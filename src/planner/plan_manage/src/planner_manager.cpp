@@ -5,7 +5,8 @@
 
 namespace ego_planner
 {
-
+  constexpr double kGroundZ = 0.0;
+  
   EGOPlannerManager::EGOPlannerManager() {}
 
   EGOPlannerManager::~EGOPlannerManager() {}
@@ -78,6 +79,17 @@ namespace ego_planner
     // 5) 若速度/加速度超限，则拉长时间并进行贴合精修；
     // 6) 保存可发布的局部轨迹及其导数。
     // 仅用于终端日志编号；static 使编号在本进程的多次函数调用之间持续递增。
+
+    // 起点和局部目标保持同一高度，规划只考虑平面运动。
+    start_pt.z() = kGroundZ;
+    local_target_pt.z() = kGroundZ;
+
+    // 固定高度的轨迹不能有竖直速度、加速度，
+    // 否则多项式初始化仍可能生成上下运动。
+    start_vel.z() = 0.0;
+    start_acc.z() = 0.0;
+    local_target_vel.z() = 0.0;
+
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -162,14 +174,21 @@ namespace ego_planner
           // horizen_dir：与起终点连线垂直的水平方向单位向量；
           // vertical_dir：再与前两者正交的方向，用于产生三维随机偏移。
           Eigen::Vector3d horizen_dir = ((start_pt - local_target_pt).cross(Eigen::Vector3d(0, 0, 1))).normalized();
-          Eigen::Vector3d vertical_dir = ((start_pt - local_target_pt).cross(horizen_dir)).normalized();
 
           // random_inserted_pt 以起终点中点为中心随机偏移。偏移尺度随起终点距离
           // 和连续失败次数增大，从而逐渐尝试更明显的绕行初值。
-          Eigen::Vector3d random_inserted_pt = (start_pt + local_target_pt) / 2 +
-                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * horizen_dir * 0.8 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989) +
-                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * vertical_dir * 0.4 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989);
+          Eigen::Vector3d random_inserted_pt =
+              (start_pt + local_target_pt) / 2 +
+              (((double)rand()) / RAND_MAX - 0.5) *
+              (start_pt - local_target_pt).norm() *
+              horizen_dir * 0.8 *
+              (-0.978 / (continous_failures_count_ + 0.989) + 0.989);
+
+          random_inserted_pt.z() = kGroundZ;
           // pos 的三列依次为起点、随机中间点、局部目标。
+
+          // 随机中间点也必须位于固定规划平面。
+          random_inserted_pt.z() = kGroundZ;
           Eigen::MatrixXd pos(3, 3);
           pos.col(0) = start_pt;
           pos.col(1) = random_inserted_pt;
@@ -417,6 +436,7 @@ namespace ego_planner
     {
 
       // ratio > 1 时表示为了满足速度/加速度限制，时间轴至少需要放大的比例。
+      double ratio = 1.0;  // 可行性检查通过引用返回所需的时间缩放比例。
       bool flag_step_2_success = true;
       if (!pos.checkFeasibility(ratio, false))
       {
@@ -515,22 +535,40 @@ namespace ego_planner
   bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                                                   const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
+    Eigen::Vector3d planar_start = start_pos;
+    Eigen::Vector3d planar_start_vel = start_vel;
+    Eigen::Vector3d planar_start_acc = start_acc;
+    Eigen::Vector3d planar_end_vel = end_vel;
+    Eigen::Vector3d planar_end_acc = end_acc;
 
+    planar_start.z() = kGroundZ;
+    planar_start_vel.z() = 0.0;
+    planar_start_acc.z() = 0.0;
+    planar_end_vel.z() = 0.0;
+    planar_end_acc.z() = 0.0;
+
+    // 航点也要全部投影到同一个规划平面。
+    std::vector<Eigen::Vector3d> planar_waypoints = waypoints;
+    if (planar_waypoints.empty())
+        return false;
+
+    for (auto &point : planar_waypoints)
+        point.z() = kGroundZ;
+
+    // 以下是原有代码……
     // 生成经过多个航点的全局多项式参考；它提供总体进度，不直接承担避障。
 
     vector<Eigen::Vector3d> points;
-    points.push_back(start_pos);
+    points.push_back(planar_start);
 
-    for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
-    {
-      points.push_back(waypoints[wp_i]);
-    }
+    for (const auto &point : planar_waypoints)
+        points.push_back(point);
 
-    double total_len = 0;
-    total_len += (start_pos - waypoints[0]).norm();
-    for (size_t i = 0; i < waypoints.size() - 1; i++)
+    double total_len = (planar_start - planar_waypoints.front()).norm();
+    for (size_t i = 1; i < planar_waypoints.size(); ++i)
     {
-      total_len += (waypoints[i + 1] - waypoints[i]).norm();
+        total_len +=
+            (planar_waypoints[i] - planar_waypoints[i - 1]).norm();
     }
 
     // insert intermediate points if too far
@@ -577,16 +615,24 @@ namespace ego_planner
 
     PolynomialTraj gl_traj;
     if (pos.cols() >= 3)
-      gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, end_vel, start_acc, end_acc, time);
+    {
+        gl_traj = PolynomialTraj::minSnapTraj(
+            pos, planar_start_vel, planar_end_vel,
+            planar_start_acc, planar_end_acc, time);
+    }
     else if (pos.cols() == 2)
-      gl_traj = PolynomialTraj::one_segment_traj_gen(start_pos, start_vel, start_acc, pos.col(1), end_vel, end_acc, time(0));
+    {
+        gl_traj = PolynomialTraj::one_segment_traj_gen(
+            planar_start, planar_start_vel, planar_start_acc,
+            pos.col(1), planar_end_vel, planar_end_acc, time(0));
+    }
     else
-      return false;
+    {
+        return false;
+    }
 
-    auto time_now = rclcpp::Clock().now();
-
-    global_data_.setGlobalTraj(gl_traj, time_now);
-
+    // 保存生成的全局参考轨迹，供状态机提取局部目标和推进航点。
+    global_data_.setGlobalTraj(gl_traj, rclcpp::Clock().now());
     return true;
   }
 
@@ -594,11 +640,27 @@ namespace ego_planner
                                          const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
 
+        // 保留输入不变，使用副本构造平面全局参考轨迹。
+    Eigen::Vector3d planar_start = start_pos;
+    Eigen::Vector3d planar_end = end_pos;
+    Eigen::Vector3d planar_start_vel = start_vel;
+    Eigen::Vector3d planar_start_acc = start_acc;
+    Eigen::Vector3d planar_end_vel = end_vel;
+    Eigen::Vector3d planar_end_acc = end_acc;
+
+    // 固定位置高度，并清除会引起上下运动的边界导数。
+    planar_start.z() = kGroundZ;
+    planar_end.z() = kGroundZ;
+    planar_start_vel.z() = 0.0;
+    planar_start_acc.z() = 0.0;
+    planar_end_vel.z() = 0.0;
+    planar_end_acc.z() = 0.0;  
+    
     // 单终点版本：起终点距离超过 4 m 时沿直线补中间点，再生成多项式。
 
     vector<Eigen::Vector3d> points;
-    points.push_back(start_pos);
-    points.push_back(end_pos);
+    points.push_back(planar_start);
+    points.push_back(planar_end);
 
     // insert intermediate points if too far
     vector<Eigen::Vector3d> inter_points;
@@ -644,16 +706,24 @@ namespace ego_planner
 
     PolynomialTraj gl_traj;
     if (pos.cols() >= 3)
-      gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, end_vel, start_acc, end_acc, time);
+    {
+        gl_traj = PolynomialTraj::minSnapTraj(
+            pos, planar_start_vel, planar_end_vel,
+            planar_start_acc, planar_end_acc, time);
+    }
     else if (pos.cols() == 2)
-      gl_traj = PolynomialTraj::one_segment_traj_gen(start_pos, start_vel, start_acc, end_pos, end_vel, end_acc, time(0));
+    {
+        gl_traj = PolynomialTraj::one_segment_traj_gen(
+            planar_start, planar_start_vel, planar_start_acc,
+            planar_end, planar_end_vel, planar_end_acc, time(0));
+    }
     else
-      return false;
+    {
+        return false;
+    }
 
-    auto time_now = rclcpp::Clock().now();
-
-    global_data_.setGlobalTraj(gl_traj, time_now);
-
+    // 保存生成的全局参考轨迹，供状态机提取局部目标和推进航点。
+    global_data_.setGlobalTraj(gl_traj, rclcpp::Clock().now());
     return true;
   }
 

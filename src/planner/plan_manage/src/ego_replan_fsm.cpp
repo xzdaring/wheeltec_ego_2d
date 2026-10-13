@@ -3,7 +3,7 @@
 
 namespace ego_planner
 {
-
+  constexpr double kGroundZ = 0.0;  // 地面高度
   void EGOReplanFSM::init(rclcpp::Node::SharedPtr &node)
   {
     // 本函数只在进程启动时调用一次。初始化顺序非常重要：
@@ -193,7 +193,7 @@ namespace ego_planner
     {
       wps_[i](0) = waypoints_[i][0];
       wps_[i](1) = waypoints_[i][1];
-      wps_[i](2) = waypoints_[i][2];
+      wps_[i](2) = kGroundZ;
     }
 
     // 用 visualization_->displayGoalPoint() 方法对waypoint进行可视化
@@ -264,7 +264,7 @@ namespace ego_planner
   void EGOReplanFSM::waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
   {
     // z < -0.1 被视为无效点击。有效目标也只采用消息的 x/y，实际高度在
-    // 下方固定为 1.0 m；若希望 RViz 同时指定高度，需要修改 end_wp 构造。
+    // 下方固定为 kGroundZ；若希望 RViz 同时指定高度，需要修改 end_wp 构造。
     if (msg->pose.position.z < -0.1)
       return;
 
@@ -272,7 +272,7 @@ namespace ego_planner
 
     init_pt_ = odom_pos_;
 
-    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, 1.0);
+    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, kGroundZ);
 
     planNextWaypoint(end_wp);
   }
@@ -283,11 +283,11 @@ namespace ego_planner
     // nav_msgs/Odometry 不含线加速度，当前代码也没有在线估算 odom_acc_。
     odom_pos_(0) = msg->pose.pose.position.x;
     odom_pos_(1) = msg->pose.pose.position.y;
-    odom_pos_(2) = msg->pose.pose.position.z;
+    odom_pos_(2) = kGroundZ;
 
     odom_vel_(0) = msg->twist.twist.linear.x;
     odom_vel_(1) = msg->twist.twist.linear.y;
-    odom_vel_(2) = msg->twist.twist.linear.z;
+    odom_vel_(2) = 0.0;
 
     // odom_acc_ = estimateAcc( msg );
 

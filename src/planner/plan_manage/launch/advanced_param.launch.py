@@ -119,7 +119,7 @@ def generate_launch_description():
         output='screen',
         remappings=[
             # 本机状态与规划结果：每架无人机使用独立前缀，避免同名冲突。
-            ('odom_world', ['drone_', drone_id, '_', odometry_topic]),
+            ('odom_world', '/odom'), 
             ('planning/bspline', ['drone_', drone_id, '_planning/bspline']),
             ('planning/data_display', ['drone_', drone_id, '_planning/data_display']),
             # 所有无人机共享广播话题；FSM 收到后用 drone_id 忽略自身消息。
@@ -134,7 +134,7 @@ def generate_launch_description():
             ('a_star_list', ['drone_', drone_id, '_plan_vis/a_star_list']),
             
             # GridMap 的传感器输入和膨胀地图输出。
-            ('grid_map/odom', ['drone_', drone_id, '_', odometry_topic]),
+            ('grid_map/odom', '/odom'),
             ('grid_map/cloud', ['drone_', drone_id, '_', cloud_topic]),
             ('grid_map/pose', ['drone_', drone_id, '_', camera_pose_topic]),
             ('grid_map/depth', ['drone_', drone_id, '_', depth_topic]),
@@ -150,6 +150,7 @@ def generate_launch_description():
             {'fsm/emergency_time': 1.0},           # 预计 1 s 内碰撞则进入急停。
             {'fsm/realworld_experiment': False},   # False 时无需外部遥控触发。
             {'fsm/fail_safe': True},               # 急停稳定后允许自动恢复规划。
+            {'use_sim_time': True},
             
             # PRESET_TARGET 模式使用的世界坐标航点，单位 m。
             {'fsm/waypoint_num': point_num},
@@ -173,13 +174,13 @@ def generate_launch_description():
             {'grid_map/resolution': 0.1},          # 体素边长；越小越精细、耗时和内存越大。
             {'grid_map/map_size_x': map_size_x},
             {'grid_map/map_size_y': map_size_y},
-            {'grid_map/map_size_z': map_size_z},
+            {'grid_map/map_size_z': 2.0},
             {'grid_map/local_update_range_x': 5.5}, # 每次围绕相机更新的局部半范围，m。
             {'grid_map/local_update_range_y': 5.5},
             {'grid_map/local_update_range_z': 4.5},
-            {'grid_map/obstacles_inflation': 0.099}, # 障碍膨胀半径，约 9.9 cm。
+            {'grid_map/obstacles_inflation': 0.20}, # 障碍膨胀半径，约 9.9 cm。
             {'grid_map/local_map_margin': 10},       # 局部更新边界额外保留的体素层数。
-            {'grid_map/ground_height': -0.01},       # 世界坐标地面高度，m。
+            {'grid_map/ground_height': -0.5},       # 世界坐标地面高度，m。
             # 相机参数：必须与深度图实际标定一致。
             {'grid_map/cx': cx},
             {'grid_map/cy': cy},
@@ -202,11 +203,11 @@ def generate_launch_description():
             {'grid_map/min_ray_length': 0.1},          # 太近的深度射线不融合，m。
             {'grid_map/max_ray_length': 4.5},          # 射线融合最大长度，m。
             
-            {'grid_map/virtual_ceil_height': 2.9},      # 虚拟天花板高度，限制飞行上界，m。
+            {'grid_map/virtual_ceil_height': -1.0},      # 虚拟天花板高度，限制飞行上界，m。
             {'grid_map/visualization_truncate_height': 1.8}, # RViz 显示截断高度，不等于规划上界。
             {'grid_map/show_occ_time': False},
             {'grid_map/pose_type': 1},                 # 1=PoseStamped；2=Odometry，见 GridMap 枚举。
-            {'grid_map/frame_id': "world"},
+            {'grid_map/frame_id': "odom"},
             # ---------------- PlannerManager：轨迹尺度与物理限制 ----------------
             {'manager/max_vel': max_vel},              # 各轴最大速度，m/s。
             {'manager/max_acc': max_acc},              # 各轴最大加速度，m/s²。

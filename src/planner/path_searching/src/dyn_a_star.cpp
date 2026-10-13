@@ -1,7 +1,14 @@
 #include "path_searching/dyn_a_star.h"
 
+
+
 using namespace std;
 using namespace Eigen;
+
+namespace
+{
+    constexpr double kGroundZ = 0.0;
+}
 
 /**
  * @brief 释放 initGridMap() 为每一个栅格创建的 GridNode 对象。
@@ -181,6 +188,9 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
 bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt)
 {
+    
+    start_pt.z() = kGroundZ;
+    end_pt.z() = kGroundZ;
     // 记录开始时间，因为本实现给每次搜索设置了 0.2 秒硬超时。
     rclcpp::Time time_1 = rclcpp::Clock().now();
 
@@ -276,7 +286,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
          */
         for (int dx = -1; dx <= 1; dx++)
             for (int dy = -1; dy <= 1; dy++)
-                for (int dz = -1; dz <= 1; dz++)
+                for (int dz = 0; dz <= 0; dz++)
                 {
                     if (dx == 0 && dy == 0 && dz == 0)
                         // 不能把自己当作自己的邻居。

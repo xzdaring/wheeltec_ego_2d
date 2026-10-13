@@ -13,6 +13,8 @@
 namespace ego_planner
 {
 
+  constexpr double kGroundZ = 0.0;
+
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
   {
 
@@ -55,6 +57,7 @@ namespace ego_planner
   void BsplineOptimizer::setControlPoints(const Eigen::MatrixXd &points)
   {
     cps_.points = points;
+    cps_.points.row(2).setConstant(kGroundZ);
   }
 
   void BsplineOptimizer::setBsplineInterval(const double &ts) { bspline_interval_ = ts; }
@@ -491,6 +494,9 @@ namespace ego_planner
   std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
 
+    // 在障碍检测和绕障初始化之前，统一初始控制点高度。
+    init_points.row(2).setConstant(kGroundZ);
+    
     if (flag_first_init)
     {
       cps_.clearance = dist0_;
@@ -1545,6 +1551,7 @@ namespace ego_planner
     return flag_success;
   }
 
+
   // 使用L-BFGS方法对目标函数进行优化，得到光滑、无碰撞、动力学可行、与其他无人机碰撞、结束项的轨迹。
   bool BsplineOptimizer::rebound_optimize(double &final_cost)
   {
@@ -1553,7 +1560,9 @@ namespace ego_planner
     // int end_id = this->cps_.size - order_; //Fixed end
     int end_id = this->cps_.size; // Free end
     // 变量个数
-    variable_num_ = 3 * (end_id - start_id);
+    // 每个控制点只优化 x、y；所有控制点的 z 固定。
+    cps_.points.row(2).setConstant(kGroundZ);
+    variable_num_ = 2 * (end_id - start_id);
 
     rclcpp::Time t0 = rclcpp::Clock().now(), t1, t2;
     int restart_nums = 0, rebound_times = 0;
@@ -1573,7 +1582,13 @@ namespace ego_planner
 
       // 控制点数组初始化
       double q[variable_num_];
-      memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
+      // 三维控制点矩阵仍保留，只把 x、y 打包给求解器。
+      for (int i = start_id; i < end_id; ++i)
+      {
+          const int j = 2 * (i - start_id);
+          q[j]     = cps_.points(0, i);
+          q[j + 1] = cps_.points(1, i);
+      }
 
       // 初始化L-BFGS算法的参数
       lbfgs::lbfgs_parameter_t lbfgs_params;
@@ -1586,6 +1601,16 @@ namespace ego_planner
       t1 = rclcpp::Clock().now();
       // 执行优化
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRebound, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
+
+      // 使用求解器最终返回的变量更新控制点，随后再做碰撞检查。
+      for (int i = start_id; i < end_id; ++i)
+      {
+          const int j = 2 * (i - start_id);
+          cps_.points(0, i) = q[j];
+          cps_.points(1, i) = q[j + 1];
+      }
+      cps_.points.row(2).setConstant(kGroundZ);
+
       t2 = rclcpp::Clock().now();
       double time_ms = (t2 - t1).seconds() * 1000;
       double total_time_ms = (t2 - t0).seconds() * 1000;
@@ -1735,12 +1760,20 @@ namespace ego_planner
     iter_num_ = 0;
     int start_id = order_;
     int end_id = this->cps_.points.cols() - order_;
-    variable_num_ = 3 * (end_id - start_id);
+    // 每个控制点只优化 x、y；所有控制点的 z 固定。
+    cps_.points.row(2).setConstant(kGroundZ);
+    variable_num_ = 2 * (end_id - start_id);
 
     double q[variable_num_];
     double final_cost;
 
-    memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
+    // 三维控制点矩阵仍保留，只把 x、y 打包给求解器。
+    for (int i = start_id; i < end_id; ++i)
+    {
+        const int j = 2 * (i - start_id);
+        q[j]     = cps_.points(0, i);
+        q[j + 1] = cps_.points(1, i);
+    }
 
     double origin_lambda4 = lambda4_;
     bool flag_safe = true;
@@ -1754,6 +1787,16 @@ namespace ego_planner
       lbfgs_params.g_epsilon = 0.001;
 
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL, this, &lbfgs_params);
+      
+      // 使用求解器最终返回的变量更新控制点，随后再做碰撞检查。
+      for (int i = start_id; i < end_id; ++i)
+      {
+          const int j = 2 * (i - start_id);
+          cps_.points(0, i) = q[j];
+          cps_.points(1, i) = q[j + 1];
+      }
+      cps_.points.row(2).setConstant(kGroundZ);
+
       if (result == lbfgs::LBFGS_CONVERGENCE ||
           result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
           result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
@@ -1812,7 +1855,14 @@ namespace ego_planner
     // cout << "n=" << n << endl;
     // cout << "sizeof(x[0])=" << sizeof(x[0]) << endl;
 
-    memcpy(cps_.points.data() + 3 * order_, x, n * sizeof(x[0]));
+    // 将求解器的二维变量写回控制点矩阵。
+    for (int j = 0; j < n / 2; ++j)
+    {
+        const int i = order_ + j;
+        cps_.points(0, i) = x[2 * j];
+        cps_.points(1, i) = x[2 * j + 1];
+    }
+    cps_.points.row(2).setConstant(kGroundZ);
 
     /* ---------- evaluate cost and gradient ---------- */
     double f_smoothness, f_distance, f_feasibility /*, f_mov_objs*/, f_swarm, f_terminal;
@@ -1837,14 +1887,27 @@ namespace ego_planner
 
     Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal;
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
-    memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
+    // 只返回 x、y 的梯度，z 不参与求解。
+    for (int j = 0; j < n / 2; ++j)
+    {
+        const int i = order_ + j;
+        grad[2 * j]     = grad_3D(0, i);
+        grad[2 * j + 1] = grad_3D(1, i);
+    }
   }
 
   // 计算优化后的损失
   void BsplineOptimizer::combineCostRefine(const double *x, double *grad, double &f_combine, const int n)
   {
 
-    memcpy(cps_.points.data() + 3 * order_, x, n * sizeof(x[0]));
+    // 将求解器的二维变量写回控制点矩阵。
+    for (int j = 0; j < n / 2; ++j)
+    {
+        const int i = order_ + j;
+        cps_.points(0, i) = x[2 * j];
+        cps_.points(1, i) = x[2 * j + 1];
+    }
+    cps_.points.row(2).setConstant(kGroundZ);
 
     /* ---------- evaluate cost and gradient ---------- */
     double f_smoothness, f_fitness, f_feasibility;
@@ -1864,7 +1927,13 @@ namespace ego_planner
     // printf("origin %f %f %f %f\n", f_smoothness, f_fitness, f_feasibility, f_combine);
 
     Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * g_fitness + lambda3_ * g_feasibility;
-    memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
+    // 只返回 x、y 的梯度，z 不参与求解。
+    for (int j = 0; j < n / 2; ++j)
+    {
+        const int i = order_ + j;
+        grad[2 * j]     = grad_3D(0, i);
+        grad[2 * j + 1] = grad_3D(1, i);
+    }
   }
 
 } // namespace ego_planner
