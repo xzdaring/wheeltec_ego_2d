@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<!-- xacro 是 URDF 的预处理器，可引用其他描述文件，避免复制整份 CAD 模型。 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="v550_mec_sim">
+  <!-- include 将原始 robot 内的 link/joint 加入当前机器人，保留原安装坐标。 -->
+  <xacro:include filename="$(find wheeltec_robot_urdf)/urdf/V550_mec_robot.urdf"/>
+
+  <!-- 无 reference 的 gazebo 标签用于模型级插件，而不是某个 link 的属性。 -->
+  <gazebo>
+    <!-- name 是插件实例名；filename 是 gazebo_plugins 安装的共享库文件名。
+         此插件直接设置车体的平面速度，支持 vx、vy、wz。
+         它不计算麦轮滚子接触，也不主动驱动轮关节；用于先验证导航闭环。 -->
+    <plugin name="v550_planar_move" filename="libgazebo_ros_planar_move.so">
+      <ros>
+        <!-- 使用根命名空间，便于先用 /cmd_vel 和 /odom 连接单车。 -->
+        <namespace>/</namespace>
+        <!-- 左侧是插件内部话题，右侧是实际 ROS 话题。 -->
+        <remapping>cmd_vel:=/cmd_vel</remapping>
+        <remapping>odom:=/odom</remapping>
+      </ros>
+      <!-- 更新运动的最大频率，单位 Hz；实际受物理仿真步长限制。 -->
+      <update_rate>100.0</update_rate>
+      <!-- 里程计与 TF 发布频率，单位 Hz，不必等于物理更新频率。 -->
+      <publish_rate>50.0</publish_rate>
+      <!-- 输出 nav_msgs/Odometry，后续规划器和跟踪器使用这份反馈。 -->
+      <publish_odom>true</publish_odom>
+      <!-- 由本插件唯一负责 odom 到 base_link 的 TF，避免重复发布。 -->
+      <publish_odom_tf>true</publish_odom_tf>
+      <!-- 里程计参考坐标系及机器人主体坐标系；必须与后续节点一致。 -->
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+    </plugin>
+
+    <!-- 读取 Gazebo 关节状态，供 robot_state_publisher 计算轮子 TF。
+         此插件不控制轮速；没有额外轮驱动时，轮子不会按 cmd_vel 主动旋转。 -->
+    <plugin name="v550_joint_states" filename="libgazebo_ros_joint_state_publisher.so">
+      <ros>
+        <namespace>/</namespace>
+        <!-- 不再另启通用 joint_state_publisher，避免同一话题出现矛盾状态。 -->
+        <remapping>joint_states:=/joint_states</remapping>
+      </ros>
+      <!-- 每秒读取并发布 50 次关节状态。 -->
+      <update_rate>50.0</update_rate>
+      <!-- 名字必须匹配原 URDF：左前、左后、右后、右前轮关节。 -->
+      <joint_name>lf_wheel_joint</joint_name>
+      <joint_name>lb_wheel_joint</joint_name>
+      <joint_name>rb_wheel_joint</joint_name>
+      <joint_name>rf_wheel_joint</joint_name>
+    </plugin>
+  </gazebo>
+  <!-- reference 将传感器绑定到原模型的 laser link，沿用其安装位置。
+       ray 使用物理碰撞几何测距；世界障碍物需要具有 collision。 -->
+  <gazebo reference="laser">
+    <sensor name="v550_lidar" type="ray">
+      <!-- 相对于 laser 的位姿；不重复添加原 URDF 已定义的安装偏移。 -->
+      <pose>0 0 0 0 0 0</pose>
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>false</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <!-- 教学仿真参数：360 度、720 束；不是实物雷达规格。 -->
+            <samples>720</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.141592653589793</min_angle>
+            <max_angle>3.141592653589793</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.10</min>
+          <max>12.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="v550_lidar_ros" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <namespace>/</namespace>
+          <!-- ~/out 是 ROS 2 ray 插件的输出端，重映射为统一的 /scan。 -->
+          <remapping>~/out:=/scan</remapping>
+        </ros>
+        <output_type>sensor_msgs/LaserScan</output_type>
+        <!-- 即使 Gazebo 合并固定关节，也明确使用原 URDF 的雷达坐标系。 -->
+        <frame_name>laser</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+  <!-- camera_link 仍只有外形和 TF，尚未配置相机传感器。 -->
+</robot>

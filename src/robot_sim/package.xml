@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- ROS 包清单：colcon 根据包名、构建类型和依赖确定如何构建这个目录。 -->
+<package format="3">
+  <!-- 启动命令 ros2 launch robot_sim 中使用的就是这个名字。 -->
+  <name>robot_sim</name>
+  <version>0.0.1</version>
+  <description>V550_mec Gazebo 平面全向运动仿真</description>
+  <maintainer email="ubuntu@example.com">ubuntu</maintainer>
+  <license>Apache-2.0</license>
+  <!-- 本包主要安装资源文件，仍通过 ament_cmake 注册为 ROS 包。 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <!-- Python 启动描述及 ROS 节点启动功能。 -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <!-- 通过 ROS 包索引定位资源，避免写死源码路径。 -->
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- 展开 xacro，得到 Gazebo 和状态发布器共同使用的完整 URDF。 -->
+  <exec_depend>xacro</exec_depend>
+  <!-- 机器人模型来自独立描述包；声明依赖使构建顺序正确。 -->
+  <exec_depend>wheeltec_robot_urdf</exec_depend>
+  <!-- 根据 URDF 与关节状态发布机器人内部 TF。 -->
+  <exec_depend>robot_state_publisher</exec_depend>
+  <!-- 提供 Gazebo 启动入口、生成机器人服务及 /clock 接口。 -->
+  <exec_depend>gazebo_ros</exec_depend>
+  <!-- 提供平面运动和关节状态两个共享库插件。 -->
+  <exec_depend>gazebo_plugins</exec_depend>
+  <export>
+    <!-- 告诉 colcon 使用 ament_cmake 处理本包。 -->
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

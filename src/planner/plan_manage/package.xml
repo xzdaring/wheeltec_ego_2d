@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <!-- ROS 2 包清单：供 colcon/ament 确认包名、元数据和依赖关系。 -->
+  <name>ego_planner</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="ma@todo.todo">ma</maintainer>
+  <license>TODO: License declaration</license>
+
+  <!-- 构建工具依赖：说明本包用 ament_cmake 编译。 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!--
+    depend 同时覆盖编译期与运行期依赖：
+    rclcpp 是 ROS 2 C++ 客户端；geometry/nav/visualization/quadrotor_msgs 是消息类型；
+    plan_env、path_searching、bspline_opt、traj_utils 是规划流水线中的其他功能包；
+    Eigen/PCL/cv_bridge 提供数学、点云和图像转换能力。
+  -->
+  <depend>rclcpp</depend>
+  <depend>ament_cmake</depend>
+  <depend>geometry_msgs</depend>
+  <depend>quadrotor_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>plan_env</depend>
+  <depend>path_searching</depend>
+  <depend>bspline_opt</depend>
+  <depend>traj_utils</depend>
+  <depend>Eigen3</depend>
+  <depend>PCL</depend>
+  <depend>pcl_conversions</depend>
+  <depend>cv_bridge</depend>
+
+  <!-- 只在 BUILD_TESTING 开启时使用的代码规范检查依赖。 -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <!-- 告诉 colcon 使用 ament_cmake 构建此包。 -->
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
