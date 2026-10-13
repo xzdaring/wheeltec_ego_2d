@@ -1,0 +1,2 @@
+# wheeltec_ego_2d
+把ego_planner算法降维为2d部署到轮趣科技的v550_mec上
