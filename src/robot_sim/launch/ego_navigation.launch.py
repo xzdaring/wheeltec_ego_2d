@@ -38,17 +38,16 @@ def generate_launch_description():  # ROS 2 launch 入口。
                                     'planning_horizon': '2.0', 
                                     'use_distinctive_trajs': 'False', 
                                     'obj_num_set': '0'}.items()),  # 复用 EGO 状态机，低速调试平面重规划。
-        Node(package='ego_planner', 
-             executable='traj_server', 
-             name='traj_server', 
-             parameters=[{'use_sim_time': True, 'traj_server/time_forward': 1.0}], 
-             remappings=[('planning/bspline', '/drone_0_planning/bspline'), 
-                         ('/position_cmd', '/ego/position_cmd')], 
-             output='screen'),  # 原 EGO 采样器将 B 样条转为期望状态。
+        Node( # 小车版直接采样轨迹并闭环输出 /cmd_vel。
+            package='ego_planner', # 使用原 EGO 包的新增可执行程序。
+            executable='ground_traj_server', # 原 traj_server 仍保留但不同时启动。
+            name='ground_traj_server', # 独立名称方便查看参数。
+            parameters=[{'use_sim_time': True}], # 与 Gazebo 统一时间。
+            output='screen'), # 输出到点与运行状态。
         Node(package='robot_sim', 
              executable='ego_navigation_bridge.py', 
              parameters=[{'use_sim_time': True}], 
-             output='screen'),  # 地图与目标转换、全向反馈控制和近障停车。
+             output='screen'),  # 仅负责地图与目标转换，车速由 C++ 节点唯一发布。
         Node(package='rviz2', 
              executable='rviz2', 
              arguments=['-d', os.path.join(sim, 'config', 'navigation.rviz')], 

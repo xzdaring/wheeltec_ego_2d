@@ -18,6 +18,8 @@ endif()
 # CMake 在这里找到依赖后，下面才能获得相应的头文件、库和链接参数。
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(tf2_ros REQUIRED) # 小车雷达需要真实坐标转换。
+find_package(sensor_msgs REQUIRED) # 雷达和障碍点云看门狗。
 find_package(geometry_msgs REQUIRED)
 find_package(quadrotor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
@@ -90,10 +92,16 @@ ament_target_dependencies(traj_server
                           path_searching bspline_opt 
                           traj_utils cv_bridge pcl_conversions)
 
+# 小车版服务器直接对 B 样条求值并输出全向底盘速度。
+add_executable(ground_traj_server src/ground_traj_server.cpp)
+ament_target_dependencies(ground_traj_server
+  rclcpp tf2_ros sensor_msgs geometry_msgs nav_msgs # 反馈与感知接口。
+  quadrotor_msgs bspline_opt traj_utils) # 复用 EGO 轨迹求值和消息。
+
 # 安装后可通过 `ros2 run ego_planner ego_planner_node` 和
 # `ros2 run ego_planner traj_server` 启动这两个程序。
 install(
-  TARGETS ego_planner_node traj_server
+  TARGETS ego_planner_node traj_server ground_traj_server # 同时保留无人机原版。
   DESTINATION lib/${PROJECT_NAME}
 )
 

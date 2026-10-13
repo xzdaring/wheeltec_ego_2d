@@ -76,7 +76,8 @@ Gazebo /scan + odom->base_link->laser
   -> ego_navigation_bridge -> /ego/cloud（odom，z=0）
 RViz /goal_pose（map）-> bridge -> /move_base_simple/goal（odom）
 /odom + /ego/cloud + goal -> EGO FSM -> /drone_0_planning/bspline
-  -> traj_server -> /ego/position_cmd -> bridge 全向反馈控制 -> /cmd_vel
+  -> ground_traj_server（B 样条求值 + 全向反馈控制）-> /cmd_vel
+  -> /ego/position_cmd（期望状态调试输出，不参与控制转发）
 ```
 
 EGO 的局部地图仍是三维数据结构，但轨迹和障碍都限制在 z=0 平面。
@@ -84,7 +85,7 @@ SLAM 累计已观测地图，桥每 0.2 秒把车旁 10×10 m 已占据栅格变
 未知栅格不视为障碍，支持朝未知区域推进；这不是保证全局可达的探索器，死胡同或复杂迷宫可能需要换目标。
 定位仍使用仿真里程计，SLAM 的地图修正用于地图与目标转换。没有预存地图依赖。
 SLAM 地图更新有延迟，当前雷达另做车体圆形包络短期扫掠检查，近障立即停车等重规划。
-地图超过 3 秒、雷达/里程计/指令超过 0.5 秒未更新都会输出零速度。
+地图超过 3 秒、雷达/里程计超过 0.5 秒、转换点云超过 0.7 秒未更新都会输出零速度。
 基础跟踪器限合速度 0.3 m/s，EGO 规划速度 0.25 m/s；定位输入或速度输出话题不能混入实车驱动。
 当前限速与近障停车不是完整动态障碍预测，也没有自动恢复倒车或全局拓扑搜索。
 
@@ -101,6 +102,31 @@ ros2 run tf2_ros tf2_echo map base_link
 
 B 样条所有控制点 z 应为零；位置命令 z、竖直速度和加速度应接近零。
 RViz 中 EGO 标记位于 odom，由 TF 转到 map 显示，不能靠改 frame_id 假装完成坐标转换。
-新增脚本逐行中文注释，解释 TF、QoS、地图投影、前馈反馈和停车分支。
+Python 桥只负责 TF、QoS 和地图投影；新增 C++ 小车服务器负责轨迹求值、前馈反馈和停车分支。
 
 仿真雷达的扫描平面现通过 `laser -> laser_scan` 固定关节抬高 0.15 m，避开 CAD 车壳；这是仿真安装适配，不代表实车雷达安装高度。原 `laser` 外形和 TF 保留。
+
+
+## 小车版 EGO 轨迹服务器
+
+`planner/plan_manage/src/ground_traj_server.cpp` 替代导航启动链中的原 `traj_server`。
+原无人机 `traj_server.cpp` 保留；两者不能同时接入同一导航速度链。
+
+```text
+onSpline：读取 EGO 三次 B 样条，校验平面高度，解析求导。
+onScan：将雷达点转换到 base_link，用于短期扫掠停车。
+control：按仿真时间求值 → 速度前馈加位置反馈 → 合速度限幅 → 车体坐标转换。
+```
+
+参数位于 `/ground_traj_server`：`kp_xy=0.8`、`max_speed=0.3`、
+`goal_tolerance=0.12`、`safety_radius=0.22`，距离单位 m，速度单位 m/s。
+保持前进和横移能力；当前仍保持车头朝向，不额外加入加速度限制和最终朝向控制。
+节点关闭时发送零速度属于尽力操作，底盘插件没有速度看门狗时不能保证进程崩溃后自动停车。
+
+重新构建后，启动命令不变：
+
+```zsh
+CMAKE_BUILD_PARALLEL_LEVEL=2 MAKEFLAGS=-j2 colcon build --packages-select ego_planner robot_sim --cmake-args -DBUILD_TESTING=OFF
+source install/setup.zsh
+ros2 launch robot_sim ego_navigation.launch.py
+```

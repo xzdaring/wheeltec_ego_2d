@@ -18,6 +18,9 @@
     Eigen/PCL/cv_bridge 提供数学、点云和图像转换能力。
   -->
   <depend>rclcpp</depend>
+  <!-- 小车服务器变换雷达坐标并监控传感器。 -->
+  <depend>tf2_ros</depend>
+  <depend>sensor_msgs</depend>
   <depend>ament_cmake</depend>
   <depend>geometry_msgs</depend>
   <depend>quadrotor_msgs</depend>
