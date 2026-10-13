@@ -15,6 +15,7 @@
 
 // 本文件使用全局变量是原项目的过程式写法；若重构为 Node 子类，可把这些
 // 状态收进类成员。这里保持原行为，只解释每个变量的用途。
+rclcpp::Clock::SharedPtr trajectory_clock; // 保留节点时钟以接收 /clock 的仿真时间。
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
 
 quadrotor_msgs::msg::PositionCommand cmd;
@@ -199,7 +200,7 @@ void cmdCallback()
     return;
 
   // 统一时间源
-  rclcpp::Clock clock(RCL_ROS_TIME);  
+  auto &clock = *trajectory_clock; // 独立 ROS Clock 未绑定时间源，必须使用节点 Clock。
   rclcpp::Time time_now = clock.now();
   // 把绝对 ROS 时间转换为 B 样条的局部参数时间。
   double t_cur = (time_now - start_time_).seconds();
@@ -236,12 +237,12 @@ void cmdCallback()
   }
   else
   {
-    cout << "[Traj server]: invalid time." << endl;
+    return; // 轨迹尚未开始时不发布虚假的零位置目标。
   }
   time_last = time_now;
 
   cmd.header.stamp = time_now;
-  cmd.header.frame_id = "world";
+  cmd.header.frame_id = "odom"; // 小车轨迹实际在 odom 中生成，反馈控制使用同一坐标系。
   cmd.trajectory_flag = quadrotor_msgs::msg::PositionCommand::TRAJECTORY_STATUS_READY;
   cmd.trajectory_id = traj_id_;
 
@@ -269,7 +270,8 @@ int main(int argc, char **argv)
 {
   // traj_server 是与 ego_planner_node 分开的第二个 ROS 2 进程。
   rclcpp::init(argc, argv);
-  auto node = rclcpp::Node::make_shared("traj_server");
+  auto node = rclcpp::Node::make_shared("traj_server"); // 创建轨迹采样节点并接收 use_sim_time 参数。
+  trajectory_clock = node->get_clock(); // 回调统一使用节点绑定的仿真时钟。
 
   // 队列深度 10：接收规划器偶尔更新的整条 B 样条消息。
   auto bspline_sub = node->create_subscription<traj_utils::msg::Bspline>(

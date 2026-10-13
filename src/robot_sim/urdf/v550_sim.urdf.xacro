@@ -49,9 +49,16 @@
   </gazebo>
   <!-- reference 将传感器绑定到原模型的 laser link，沿用其安装位置。
        ray 使用物理碰撞几何测距；世界障碍物需要具有 collision。 -->
-  <gazebo reference="laser">
+  <!-- 新建真实的扫描坐标系，抬高射线避开 CAD 车壳自遮挡；不旋转外形或伪造 TF。 -->
+  <link name="laser_scan"/> <!-- 仅作为传感器安装坐标，不增加碰撞体。 -->
+  <joint name="laser_scan_joint" type="fixed"> <!-- 用固定 TF 表达扫描平面实际高度。 -->
+    <parent link="laser"/> <!-- 保留原雷达外形和原安装位置。 -->
+    <child link="laser_scan"/> <!-- LaserScan 消息引用这个真实坐标系。 -->
+    <origin xyz="0 0 0.15" rpy="0 0 0"/> <!-- 射线高于车壳，避免把自身送入 SLAM。 -->
+  </joint> <!-- 扫描位置将由 robot_state_publisher 发布。 -->
+  <gazebo reference="laser_scan"> <!-- Gazebo 传感器绑定到抬高后的扫描平面。 -->
     <sensor name="v550_lidar" type="ray">
-      <!-- 相对于 laser 的位姿；不重复添加原 URDF 已定义的安装偏移。 -->
+      <!-- 相对于 laser_scan 的位姿；扫描高度已由固定关节表达。 -->
       <pose>0 0 0 0 0 0</pose>
       <always_on>true</always_on>
       <update_rate>10</update_rate>
@@ -80,7 +87,7 @@
         </ros>
         <output_type>sensor_msgs/LaserScan</output_type>
         <!-- 即使 Gazebo 合并固定关节，也明确使用原 URDF 的雷达坐标系。 -->
-        <frame_name>laser</frame_name>
+        <frame_name>laser_scan</frame_name> <!-- 消息坐标与真正的 ray 位姿一致。 -->
       </plugin>
     </sensor>
   </gazebo>

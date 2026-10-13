@@ -13,6 +13,7 @@ namespace ego_planner
 
   void EGOPlannerManager::initPlanModules(rclcpp::Node::SharedPtr &node, PlanningVisualization::Ptr vis)
   {
+    clock_ = node->get_clock(); // 保存节点时钟，避免独立系统时钟与仿真时间混用。
     // manager 统一持有一次规划所需的模块。GridMap 从传感器回调持续更新；
     // BsplineOptimizer 在每次重规划时读取该地图和 swarm_trajs_buf_。
     node->declare_parameter("manager/max_vel", -1.0);                 // 各轴允许最大速度，m/s。
@@ -107,7 +108,7 @@ namespace ego_planner
 
     // t_start 是当前流水线阶段的计时起点；三个 Duration 分别统计初始化、
     // 控制点优化和动力学精修耗时，只用于性能输出，不参与轨迹计算。
-    rclcpp::Time t_start = rclcpp::Clock().now();
+    rclcpp::Time t_start = clock_->now(); // 使用节点时钟保持轨迹与仿真时间一致。
     rclcpp::Duration t_init(0, 0), t_opt(0, 0), t_refine(0, 0);
 
     /*** STEP 1: INIT
@@ -245,7 +246,7 @@ namespace ego_planner
         // 新局部目标，最后按近似弧长重新均匀采样。
         // t 是旧轨迹/连接多项式的采样时间；t_cur 是旧轨迹已经执行的时间，[s]。
         double t;
-        double t_cur = (rclcpp::Clock().now() - local_data_.start_time_).seconds();
+        double t_cur = (clock_->now() - local_data_.start_time_).seconds(); // 使用节点时钟保持轨迹与仿真时间一致。
 
         // segment_point 保存“旧轨迹剩余部分 + 通往新局部目标的连接段”的稠密样本。
         // pseudo_arc_length[i] 是 segment_point[0] 到 segment_point[i] 的累计折线
@@ -349,7 +350,7 @@ namespace ego_planner
     segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
     // 计算时间差并更新时间
     // 截止此处的耗时归入初始化阶段，然后重置秒表供优化阶段使用。
-    auto now = rclcpp::Clock().now();
+    auto now = clock_->now(); // 使用节点时钟保持轨迹与仿真时间一致。
     t_init = now - t_start;
     t_start = now;
 
@@ -399,7 +400,7 @@ namespace ego_planner
         }
       }
 
-      t_opt = rclcpp::Clock().now() - t_start;
+      t_opt = clock_->now() - t_start; // 使用节点时钟保持轨迹与仿真时间一致。
 
       visualization_->displayMultiInitPathList(vis_trajs, 0.2);
     }
@@ -407,7 +408,7 @@ namespace ego_planner
     {
       // 普通模式只从当前这一组控制点开始一次 rebound 优化。
       flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
-      t_opt = rclcpp::Clock().now() - t_start;
+      t_opt = clock_->now() - t_start; // 使用节点时钟保持轨迹与仿真时间一致。
       // static int vis_id = 0;
       visualization_->displayInitPathList(point_set, 0.2, 0);
     }
@@ -420,7 +421,7 @@ namespace ego_planner
       return false;
     }
 
-    t_start = rclcpp::Clock().now();
+    t_start = clock_->now(); // 使用节点时钟保持轨迹与仿真时间一致。
 
     // 3 表示三次 B 样条，它通常具有二阶连续性，适合生成位置及其导数。
     // pos 是优化后的连续位置轨迹；ts 为均匀节点间隔。
@@ -467,11 +468,11 @@ namespace ego_planner
     }
 
     // t_refine = ros::Time::now() - t_start;
-    t_refine = rclcpp::Clock().now() - t_start;
+    t_refine = clock_->now() - t_start; // 使用节点时钟保持轨迹与仿真时间一致。
 
     // save planned results
     // 只有初始化、优化以及必要精修全部成功，才替换当前执行轨迹。
-    updateTrajInfo(pos, rclcpp::Clock().now());
+    updateTrajInfo(pos, clock_->now()); // 使用节点时钟保持轨迹与仿真时间一致。
 
     // 以下静态变量只累计成功规划的总耗时和次数，用于输出平均耗时。
     static double sum_time = 0;
@@ -499,7 +500,7 @@ namespace ego_planner
       control_points.col(i) = stop_pos;
     }
 
-    updateTrajInfo(UniformBspline(control_points, 3, 1.0), rclcpp::Clock().now());
+    updateTrajInfo(UniformBspline(control_points, 3, 1.0), clock_->now()); // 使用节点时钟保持轨迹与仿真时间一致。
 
     return true;
   }
@@ -632,7 +633,7 @@ namespace ego_planner
     }
 
     // 保存生成的全局参考轨迹，供状态机提取局部目标和推进航点。
-    global_data_.setGlobalTraj(gl_traj, rclcpp::Clock().now());
+    global_data_.setGlobalTraj(gl_traj, clock_->now()); // 使用节点时钟保持轨迹与仿真时间一致。
     return true;
   }
 
@@ -723,7 +724,7 @@ namespace ego_planner
     }
 
     // 保存生成的全局参考轨迹，供状态机提取局部目标和推进航点。
-    global_data_.setGlobalTraj(gl_traj, rclcpp::Clock().now());
+    global_data_.setGlobalTraj(gl_traj, clock_->now()); // 使用节点时钟保持轨迹与仿真时间一致。
     return true;
   }
 

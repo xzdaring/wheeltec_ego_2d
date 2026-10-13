@@ -33,6 +33,7 @@ namespace ego_planner
   {
     // SECTION stable
   public:
+    rclcpp::Clock::SharedPtr clock_; // 复用规划节点时钟，使轨迹时间跟随 Gazebo /clock。
     EGOPlannerManager();
     ~EGOPlannerManager();
 

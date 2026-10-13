@@ -1,0 +1,78 @@
+slam_toolbox: # 节点参数命名空间。
+  ros__parameters: # 节点参数命名空间。
+
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    ceres_preconditioner: SCHUR_JACOBI # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    ceres_trust_strategy: LEVENBERG_MARQUARDT # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    ceres_dogleg_type: TRADITIONAL_DOGLEG # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    ceres_loss_function: None # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    # ROS Parameters
+    odom_frame: odom # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    map_frame: map # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    base_frame: base_link # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    min_laser_range: 0.1 # 与仿真雷达最小有效距离一致，避免融合近场无效回波。
+    scan_topic: /scan # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    use_map_saver: true # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    mode: mapping #localization # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    # if you'd like to immediately start continuing a map at a given pose
+    # or at the dock, but they are mutually exclusive, if pose is given
+    # will use pose
+    #map_file_name: test_steve
+    # map_start_pose: [0.0, 0.0, 0.0]
+    #map_start_at_dock: true
+
+    debug_logging: false # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    throttle_scans: 1 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    transform_publish_period: 0.02 #if 0 never publishes odometry # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    map_update_interval: 0.5 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    resolution: 0.05 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    min_laser_range: 0.0 #for rastering images # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    max_laser_range: 12.0 #for rastering images # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    minimum_time_interval: 0.1 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    transform_timeout: 0.2 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    tf_buffer_duration: 30. # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    stack_size_to_use: 40000000 #// program needs a larger stack size to serialize large maps # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    enable_interactive_mode: true # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    # General Parameters
+    use_scan_matching: true # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    use_scan_barycenter: true # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    minimum_travel_distance: 0.1 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    minimum_travel_heading: 0.1 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    scan_buffer_size: 10 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    scan_buffer_maximum_scan_distance: 10.0 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    link_match_minimum_response_fine: 0.1   # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    link_scan_maximum_distance: 1.5 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_search_maximum_distance: 3.0 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    do_loop_closing: true  # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_match_minimum_chain_size: 10            # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_match_maximum_variance_coarse: 3.0   # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_match_minimum_response_coarse: 0.35     # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_match_minimum_response_fine: 0.45 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    # Correlation Parameters - Correlation Parameters
+    correlation_search_space_dimension: 0.5 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    correlation_search_space_resolution: 0.01 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    correlation_search_space_smear_deviation: 0.1  # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    # Correlation Parameters - Loop Closure Parameters
+    loop_search_space_dimension: 8.0 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_search_space_resolution: 0.05 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    loop_search_space_smear_deviation: 0.03 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    # Scan Matcher Parameters
+    distance_variance_penalty: 0.5       # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    angle_variance_penalty: 1.0     # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+
+    fine_search_angle_offset: 0.00349      # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    coarse_search_angle_offset: 0.349    # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    coarse_angle_resolution: 0.0349         # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    minimum_angle_penalty: 0.9 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    minimum_distance_penalty: 0.5 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    use_response_expansion: true # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    min_pass_through: 2 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。
+    occupancy_threshold: 0.1 # 在线 SLAM 参数；沿用官方求解器，车型使用 base_link，地图周期 0.5 秒。

@@ -24,6 +24,30 @@
   <exec_depend>gazebo_ros</exec_depend>
   <!-- 提供平面运动和关节状态两个共享库插件。 -->
   <exec_depend>gazebo_plugins</exec_depend>
+  <!-- 在线导航使用 rclpy 提供消息、计算或运行节点。 -->
+  <exec_depend>rclpy</exec_depend>
+  <!-- 在线导航使用 numpy 提供消息、计算或运行节点。 -->
+  <exec_depend>python3-numpy</exec_depend>
+  <!-- 在线导航使用 tf2_ros 提供消息、计算或运行节点。 -->
+  <exec_depend>tf2_ros</exec_depend>
+  <!-- 在线导航使用 sensor_msgs_py 提供消息、计算或运行节点。 -->
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <!-- 在线导航使用 sensor_msgs 提供消息、计算或运行节点。 -->
+  <exec_depend>sensor_msgs</exec_depend>
+  <!-- 在线导航使用 geometry_msgs 提供消息、计算或运行节点。 -->
+  <exec_depend>geometry_msgs</exec_depend>
+  <!-- 在线导航使用 nav_msgs 提供消息、计算或运行节点。 -->
+  <exec_depend>nav_msgs</exec_depend>
+  <!-- 在线导航使用 quadrotor_msgs 提供消息、计算或运行节点。 -->
+  <exec_depend>quadrotor_msgs</exec_depend>
+  <!-- 在线导航使用 traj_utils 提供消息、计算或运行节点。 -->
+  <exec_depend>traj_utils</exec_depend>
+  <!-- 在线导航使用 ego_planner 提供消息、计算或运行节点。 -->
+  <exec_depend>ego_planner</exec_depend>
+  <!-- 在线导航使用 slam_toolbox 提供消息、计算或运行节点。 -->
+  <exec_depend>slam_toolbox</exec_depend>
+  <!-- 在线导航使用 rviz2 提供消息、计算或运行节点。 -->
+  <exec_depend>rviz2</exec_depend>
   <export>
     <!-- 告诉 colcon 使用 ament_cmake 处理本包。 -->
     <build_type>ament_cmake</build_type>

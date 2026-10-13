@@ -135,7 +135,7 @@ def generate_launch_description():
             
             # GridMap 的传感器输入和膨胀地图输出。
             ('grid_map/odom', '/odom'),
-            ('grid_map/cloud', ['drone_', drone_id, '_', cloud_topic]),
+            ('grid_map/cloud', '/ego/cloud'), # 在线地图适配器已经把障碍转换到 odom。
             ('grid_map/pose', ['drone_', drone_id, '_', camera_pose_topic]),
             ('grid_map/depth', ['drone_', drone_id, '_', depth_topic]),
             ('grid_map/occupancy_inflate', ['drone_', drone_id, '_grid/grid_map/occupancy_inflate'])

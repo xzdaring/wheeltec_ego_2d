@@ -6,9 +6,10 @@ project(robot_sim)
 find_package(ament_cmake REQUIRED)
 
 # 安装启动、机器人和世界资源，使 ros2 launch 能从安装目录找到它们。
-install(DIRECTORY launch urdf worlds
+install(DIRECTORY launch urdf worlds config # 同时安装在线建图参数和 RViz 配置。
   DESTINATION share/${PROJECT_NAME}
 )
 
 # 注册包索引和环境文件；必须放在依赖与安装规则之后。
+install(PROGRAMS scripts/ego_navigation_bridge.py DESTINATION lib/${PROJECT_NAME}) # 安装可执行适配器，供 ros2 launch 查找。
 ament_package()

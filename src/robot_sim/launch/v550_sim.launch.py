@@ -62,23 +62,29 @@ def generate_launch_description():
         # gazebo_ros 启动服务器并加载 ROS 初始化与生成实体插件，提供 /clock。
         # 不要同时另开一个占用相同端口的 Gazebo 服务器。
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(gazebo_share, 'launch', 'gazebo.launch.py')),
+            PythonLaunchDescriptionSource(
+                os.path.join(gazebo_share, 'launch', 'gazebo.launch.py')),
             launch_arguments={'world': world, 'gui': gui}.items(),
         ),
 
         # 固定关节发布到 /tf_static，活动关节根据 /joint_states 发布到 /tf。
         # use_sim_time 使时间跟随 /clock；暂停仿真时 ROS 时间也暂停。
         Node(
-            package='robot_state_publisher', executable='robot_state_publisher',
-            name='robot_state_publisher', output='screen',
-            parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
+            package='robot_state_publisher', 
+            executable='robot_state_publisher',
+            name='robot_state_publisher', 
+            output='screen',
+            parameters=[{'robot_description': robot_description, 
+                         'use_sim_time': True}],
         ),
 
         # 等待生成实体服务，再从 robot_description 话题读取 URDF，放入 Gazebo。
         # -entity 是 Gazebo 中的唯一模型名；-x/-y/-z 是模型初始位置。
         # 这等价于前面介绍的 ros2 run gazebo_ros spawn_entity.py 命令。
         Node(
-            package='gazebo_ros', executable='spawn_entity.py', output='screen',
+            package='gazebo_ros', 
+            executable='spawn_entity.py', 
+            output='screen',
             arguments=['-topic', 'robot_description', '-entity', 'v550_mec',
                        '-x', spawn_x, '-y', spawn_y, '-z', spawn_z],
             parameters=[{'use_sim_time': True}],

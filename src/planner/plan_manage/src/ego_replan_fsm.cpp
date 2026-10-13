@@ -285,8 +285,10 @@ namespace ego_planner
     odom_pos_(1) = msg->pose.pose.position.y;
     odom_pos_(2) = kGroundZ;
 
-    odom_vel_(0) = msg->twist.twist.linear.x;
-    odom_vel_(1) = msg->twist.twist.linear.y;
+    const Eigen::Quaterniond orientation(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, msg->pose.pose.orientation.y, msg->pose.pose.orientation.z); // Odometry 速度在子坐标系，先读取车体姿态。
+    const Eigen::Vector3d world_velocity = orientation * Eigen::Vector3d(msg->twist.twist.linear.x, msg->twist.twist.linear.y, 0.0); // 旋转到 odom，匹配规划位置的参考系。
+    odom_vel_(0) = world_velocity.x(); // 规划边界速度采用 odom 的 X 分量。
+    odom_vel_(1) = world_velocity.y(); // 横移速度也必须完成坐标转换。
     odom_vel_(2) = 0.0;
 
     // odom_acc_ = estimateAcc( msg );
@@ -307,17 +309,17 @@ namespace ego_planner
       return;
 
     // if (abs((ros::Time::now() - msg->start_time).toSec()) > 0.25)
-    rclcpp::Clock clock(RCL_SYSTEM_TIME);  // 确保使用当前节点的时间源
+    auto &clock = *node_->get_clock(); // 邻机时间与节点仿真时钟一致。
     auto msg_time = rclcpp::Time(msg->start_time, clock.get_clock_type());
     // RCLCPP_INFO(node_->get_logger(), "Clock type: %d", rclcpp::Clock().now().get_clock_type());
     // RCLCPP_INFO(node_->get_logger(), "Start time clock type: %d", rclcpp::Time(msg->start_time).get_clock_type());
     // RCLCPP_INFO(node_->get_logger(), "msg_time: %d", msg_time.get_clock_type());
     // 邻机消息超过 0.25 s 就拒收。多机真机必须保证计算机时钟同步。
-    if (abs((rclcpp::Clock().now() - msg_time).seconds()) > 0.25)
+    if (abs((node_->now() - msg_time).seconds()) > 0.25) // 使用节点仿真时间计算进度和消息时间差。
     {
       // ROS_ERROR("Time difference is too large! Local - Remote Agent %d = %fs", msg->drone_id, (ros::Time::now() - msg->start_time).toSec());
       RCLCPP_ERROR(node_->get_logger(), "Time difference is too large! Local - Remote Agent %d = %fs",
-                   msg->drone_id, (rclcpp::Clock().now() - msg_time).seconds());
+                   msg->drone_id, (node_->now() - msg_time).seconds()); // 使用节点仿真时间计算进度和消息时间差。
       return;
     }
 
@@ -617,7 +619,7 @@ namespace ego_planner
       // 此处只在旧轨迹上判断“何时滚动重规划”。真正的障碍物逐点安全检查
       // 在 checkCollisionCallback() 中以另一个定时器执行。
       LocalTrajData *info = &planner_manager_->local_data_;
-      rclcpp::Time time_now = rclcpp::Clock().now();
+      rclcpp::Time time_now = node_->now(); // 使用节点仿真时间计算进度和消息时间差。
       double t_cur = (time_now - info->start_time_).seconds();
       t_cur = std::min(info->duration_, t_cur);
 
@@ -684,7 +686,7 @@ namespace ego_planner
     }
 
     // 无论本周期是否发生规划，都更新时间戳并发布调试统计。
-    data_disp_.header.stamp = rclcpp::Clock().now();
+    data_disp_.header.stamp = node_->now(); // 使用节点仿真时间计算进度和消息时间差。
     data_disp_pub_->publish(data_disp_);
 
   force_return:;
@@ -728,7 +730,7 @@ namespace ego_planner
     // 位置/速度/加速度，作为新轨迹的完整边界状态。
     LocalTrajData *info = &planner_manager_->local_data_;
     // ros::Time time_now = ros::Time::now();
-    auto time_now = rclcpp::Clock().now();
+    auto time_now = node_->now(); // 使用节点仿真时间计算进度和消息时间差。
     // double t_cur = (time_now - info->start_time_).toSec();
     double t_cur = (time_now - info->start_time_).seconds();
 
@@ -783,12 +785,12 @@ namespace ego_planner
     // 每 0.01 s 采样一次未来轨迹；越小检查越密，CPU 开销也越大。
     constexpr double time_step = 0.01;
     // double t_cur = (ros::Time::now() - info->start_time_).toSec();
-    double t_cur = (rclcpp::Clock().now() - info->start_time_).seconds();
+    double t_cur = (node_->now() - info->start_time_).seconds(); // 使用节点仿真时间计算进度和消息时间差。
 
     Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(t_cur);
     const double CLEARANCE = 1.0 * planner_manager_->getSwarmClearance();
     // double t_cur_global = ros::Time::now().toSec();
-    double t_cur_global = rclcpp::Clock().now().seconds();
+    double t_cur_global = node_->now().seconds(); // 使用节点仿真时间计算进度和消息时间差。
 
     // 只重点检查轨迹前 2/3，尾部通常会在滚动重规划中被替换。
     double t_2_3 = info->duration_ * 2 / 3;
