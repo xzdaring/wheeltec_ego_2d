@@ -11,5 +11,8 @@ install(DIRECTORY launch urdf worlds config # 同时安装在线建图参数和 
 )
 
 # 注册包索引和环境文件；必须放在依赖与安装规则之后。
-install(PROGRAMS scripts/ego_navigation_bridge.py DESTINATION lib/${PROJECT_NAME}) # 安装可执行适配器，供 ros2 launch 查找。
+install(PROGRAMS # 安装导航适配和独立显示节点。
+  scripts/ego_navigation_bridge.py # 地图与目标转换。
+  scripts/navigation_visualizer.py # 曲线、行驶路径和参数文字。
+  DESTINATION lib/${PROJECT_NAME}) # ros2 launch 的可执行查找目录。
 ament_package()

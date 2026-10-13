@@ -29,11 +29,30 @@ Visualization Manager: # 配置导航坐标和可视化订阅。
         Value: /scan # Gazebo 雷达输出。
         Reliability Policy: Best Effort # 兼容传感器发布者。
       Size (m): 0.03 # 扫描点大小。
-    - Class: rviz_default_plugins/Marker # 显示二维优化轨迹。
-      Name: EGO Trajectory # 区分 SLAM 地图。
+    - Class: rviz_default_plugins/MarkerArray # 全局、真实局部曲线和信息。
+      Name: Trajectories and Parameters # 青色全局、橙色局部、黄色速度箭头。
+      Enabled: true # 默认显示。
+      Topic: # 汇总全部轨迹细节。
+        Value: /ego/visualization # 独立可视化节点输出。
+    - Class: rviz_default_plugins/PointCloud2 # 显示 EGO 真正使用的膨胀占据体素。
+      Name: Inflated Obstacles # 与原始 SLAM 障碍区分。
+      Enabled: true # 默认显示安全包络。
+      Topic: # 不是绘制近似圆，而是读取实际膨胀地图。
+        Value: /drone_0_grid/grid_map/occupancy_inflate # EGO 地图输出。
+        Reliability Policy: Reliable # 与规划器发布者匹配。
+      Style: Flat Squares # 俯视更容易观察膨胀范围。
+      Size (m): 0.1 # 与当前体素分辨率一致。
+      Alpha: 0.25 # 半透明避免遮挡路径。
+      Color Transformer: FlatColor # 使用统一紫色表示膨胀区域。
+      Color: 180; 80; 255 # 与黑白地图和雷达点分开。
+    - Class: rviz_default_plugins/Path # 显示实际车辆走过的路径。
+      Name: Executed Path # 蓝色实际轨迹，可与橙色期望轨迹比较。
       Enabled: true # 默认启用。
-      Topic: # 订阅优化器可视化输出。
-        Value: /drone_0_plan_vis/optimal_list # launch 中编号为零。
+      Topic: # 来源是里程计反馈。
+        Value: /ego/executed_path # 可视化节点限长缓存。
+      Color: 60; 120; 255 # 蓝色代表实际运动。
+      Line Style: Lines # 连续折线。
+      Line Width: 0.03 # 避免盖住规划曲线。
   Tools: # 保留移动视角与点击目标工具。
     - Class: rviz_default_plugins/Interact # 操作可视化界面。
     - Class: rviz_default_plugins/MoveCamera # 移动视角。

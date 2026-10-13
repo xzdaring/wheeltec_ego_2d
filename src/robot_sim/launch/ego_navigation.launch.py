@@ -48,6 +48,11 @@ def generate_launch_description():  # ROS 2 launch 入口。
              executable='ego_navigation_bridge.py', 
              parameters=[{'use_sim_time': True}], 
              output='screen'),  # 仅负责地图与目标转换，车速由 C++ 节点唯一发布。
+        Node( # 显示真实曲线、全局参考和运行参数，不参与控制。
+            package='robot_sim', # 与仿真一起安装。
+            executable='navigation_visualizer.py', # 独立低频可视化节点。
+            parameters=[{'use_sim_time': True}], # 所有标记跟随仿真时间。
+            output='screen'), # 显示失败可在终端诊断。
         Node(package='rviz2', 
              executable='rviz2', 
              arguments=['-d', os.path.join(sim, 'config', 'navigation.rviz')], 

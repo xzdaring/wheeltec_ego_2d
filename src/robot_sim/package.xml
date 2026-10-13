@@ -48,6 +48,10 @@
   <exec_depend>slam_toolbox</exec_depend>
   <!-- 在线导航使用 rviz2 提供消息、计算或运行节点。 -->
   <exec_depend>rviz2</exec_depend>
+  <!-- 轨迹、箭头和参数文字的可视化消息。 -->
+  <exec_depend>visualization_msgs</exec_depend>
+  <!-- 参数文字通过 ROS 标准服务读取真实运行值。 -->
+  <exec_depend>rcl_interfaces</exec_depend>
   <export>
     <!-- 告诉 colcon 使用 ament_cmake 处理本包。 -->
     <build_type>ament_cmake</build_type>
