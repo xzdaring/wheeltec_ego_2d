@@ -232,18 +232,17 @@ namespace ego_planner
       have_target_ = true;
       have_new_target_ = true;
 
-      /*** FSM状态转换 ***/
-      if (exec_state_ == WAIT_TARGET)
-        changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
-      else
+      // 回调只更新目标和状态，实际规划交给下一次 FSM 定时器。
+      // node_ 已由主执行器管理，再调用 spin_some 会重复加入执行器并抛异常。
+      if (exec_state_ == EXEC_TRAJ) // 正常运动时沿用已有轨迹进行重规划。
       {
-        while (exec_state_ != EXEC_TRAJ)
-        {
-          rclcpp::spin_some(node_);
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        changeFSMExecState(REPLAN_TRAJ, "TRIG");
+        changeFSMExecState(REPLAN_TRAJ, "TRIG"); // 不阻塞等待状态变化。
       }
+      else if (exec_state_ != INIT) // 失败、急停或等待状态从实际里程计重新开始。
+      {
+        changeFSMExecState(GEN_NEW_TRAJ, "TRIG"); // 新目标可以替换尚未成功的旧目标。
+      }
+      // INIT 保留初始化检查，have_target_ 会使后续定时器接着处理新目标。
 
       visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
     }

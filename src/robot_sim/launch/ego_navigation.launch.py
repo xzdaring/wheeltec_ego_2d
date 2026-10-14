@@ -14,8 +14,8 @@ def generate_launch_description():  # ROS 2 launch 入口。
     return LaunchDescription([  # 各节点等待话题和 TF 就绪，无需固定启动延时。
         DeclareLaunchArgument('gui', default_value='true'),  # 控制 Gazebo 图形窗口。
         DeclareLaunchArgument('rviz', default_value='true'),  # 控制 RViz 导航界面。
-        DeclareLaunchArgument('x', default_value='1.0'),  # 默认出生在已有世界的房间内。
-        DeclareLaunchArgument('y', default_value='2.0'),  # 可按世界空地调整出生位置。
+        DeclareLaunchArgument('x', default_value='-4.1'),  # 默认出生在已有世界的房间内。
+        DeclareLaunchArgument('y', default_value='-3.3'),  # 可按世界空地调整出生位置。
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(sim, 'launch', 'v550_sim.launch.py')), 
