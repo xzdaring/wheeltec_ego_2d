@@ -25,6 +25,9 @@ public:
     kp_ = declare_parameter("kp_xy", 0.8);
     max_speed_ = declare_parameter("max_speed", 0.3);
     tolerance_ = declare_parameter("goal_tolerance", 0.12);
+    yaw_gain_ = declare_parameter("kp_yaw", 1.5); // 到点后的角度反馈增益。
+    max_yaw_rate_ = declare_parameter("max_yaw_rate", 0.6); // 转向限速 rad/s。
+    yaw_tolerance_ = declare_parameter("yaw_tolerance", 0.05); // 朝向容差 rad。
     radius_ = declare_parameter("safety_radius", 0.22);
     // 所有订阅器保存在成员中，避免构造结束后被释放。
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -38,15 +41,16 @@ public:
       });
     click_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/goal_pose", 10, [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr) {
-        active_ = have_goal_ = false; // 点击新目标立即废弃旧目标。
+        active_ = have_goal_ = aligning_ = false; // 点击新目标立即废弃旧目标。
         stop(); // 等待桥完成目标坐标转换。
       });
     goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/move_base_simple/goal", 10,
       [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr m) {
-        active_ = false; // 新目标必须等待新的规划结果。
+        active_ = aligning_ = false; // 新目标必须等待新的规划结果。
         have_goal_ = m->header.frame_id == "odom";
-        goal_ = m->pose.position; // 仅验收到达位置，保持现有车头方向。
+        goal_ = m->pose.position; // 位置与朝向都已经转换到 odom。
+        goal_yaw_ = yaw(m->pose.orientation); // 保存点击箭头要求的最终朝向。
         goal_time_ = rclcpp::Time(m->header.stamp).seconds();
         required_id_ = last_id_; // 拒绝上一目标的轨迹编号。
         stop(); // 规划等待期间不沿旧轨迹运动。
@@ -147,21 +151,50 @@ private:
     const double time = now().seconds(); // 进度与超时都使用节点仿真时间。
     const bool fresh = time - odom_time_ < 0.5 &&
       time - scan_time_ < 0.5 && time - cloud_time_ < 0.7;
-    if (!active_ || !have_goal_ || !fresh || time < start_time_)
+    if (!have_goal_ || !fresh) // 到点转向不依赖新的平移轨迹。
     {
       stop(); // 等待目标、轨迹或感知时都主动输出零速度。
       return;
     }
     const auto &p = odom_.pose.pose.position; // 当前真实底盘位置。
-    if (std::hypot(goal_.x - p.x, goal_.y - p.y) < tolerance_)
+    const double distance = std::hypot(goal_.x - p.x, goal_.y - p.y);
+    if (distance < tolerance_ * 0.5 || (aligning_ && distance < tolerance_))
+    // 进入转向用更严格的位置阈值，退出保留原容差，避免阈值附近来回切换。
     {
-      active_ = have_goal_ = false; // 到点只处理一次，下一目标重新启动。
-      RCLCPP_INFO(get_logger(), "到达目标，已停车。"); // 明确验收结果。
-      stop(); // 不继续追逐末端保持指令。
+      aligning_ = true; // 已进入最终转向阶段，允许容差内的小幅漂移。
+      const double error = goal_yaw_ - yaw(odom_.pose.pose.orientation);
+      const double angle = std::atan2(std::sin(error), std::cos(error)); // 最短角差。
+      geometry_msgs::msg::Twist turn; // 到点后平移归零，仅调整朝向。
+      if (std::abs(angle) > yaw_tolerance_) // 角度未满足则保持导航状态。
+      {
+        if (!blocked(0.0, 0.0)) // 圆形包络内有障碍时禁止原地旋转。
+          turn.angular.z = std::clamp(yaw_gain_ * angle,
+            -max_yaw_rate_, max_yaw_rate_); // 限制角速度，保留最短旋转方向。
+      }
+      else // 位置和朝向同时达标才宣布成功。
+      {
+        active_ = have_goal_ = false; // 下一次点击重新启动。
+        RCLCPP_INFO(get_logger(), "位置与最终朝向均已到达，已停车。");
+      }
+      velocity_pub_->publish(turn); // 旋转、等待或完成都显式发布速度。
+      return;
+    }
+    aligning_ = false; // 位置超出容差时重新平移，不能只满足角度。
+    if (!active_ || time < start_time_) // 平移阶段必须等待有效的新轨迹。
+    {
+      stop(); // 避免新目标执行旧平移参考。
       return;
     }
     const double t = std::clamp(time - start_time_, 0.0, duration_);
-    const Eigen::Vector3d target = position_.evaluateDeBoorT(t);
+    Eigen::Vector3d target = position_.evaluateDeBoorT(t); // 当前曲线参考点。
+    const bool ended = time - start_time_ >= duration_; // 是否已到轨迹末端。
+    const bool final_segment = std::hypot(target.x() - goal_.x,
+      target.y() - goal_.y) < tolerance_ * 2.0; // 区分最终段与滚动局部段。
+    if (ended && final_segment) // EGO 自由末端可能略偏离最终目标。
+    {
+      target.x() = goal_.x; // 最后小范围用反馈收敛到点击位置。
+      target.y() = goal_.y; // 同样经过限速与雷达扫掠停车检查。
+    }
     Eigen::Vector3d feed = velocity_.evaluateDeBoorT(t); // 直接复用轨迹导数。
     if (time - start_time_ >= duration_)
       feed.setZero(); // 超出轨迹时长后仅靠位置反馈收敛到末端。
@@ -200,10 +233,13 @@ private:
   nav_msgs::msg::Odometry odom_; // 保存完整姿态反馈。
   geometry_msgs::msg::Point goal_; // 最终位置目标。
   std::vector<Eigen::Vector2d> scan_points_; // 车体坐标下的障碍。
+  bool aligning_ = false; // 最终朝向阶段的滞回状态。
   bool active_ = false, have_goal_ = false; // 默认禁止运动。
   int64_t last_id_ = -1, required_id_ = -1; // 区分连续目标。
   double goal_time_ = 0.0, start_time_ = 0.0, duration_ = 0.0;
   double odom_time_ = -100.0, scan_time_ = -100.0, cloud_time_ = -100.0;
+  double goal_yaw_ = 0.0; // 已变换到 odom 的最终朝向。
+  double yaw_gain_, max_yaw_rate_, yaw_tolerance_; // 到点原地转向参数。
   double kp_, max_speed_, tolerance_, radius_; // 控制与停车参数。
   rclcpp::TimerBase::SharedPtr timer_; // 保持控制周期回调存活。
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;

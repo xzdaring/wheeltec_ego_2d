@@ -18,7 +18,7 @@
         <remapping>odom:=/odom</remapping>
       </ros>
       <!-- 更新运动的最大频率，单位 Hz；实际受物理仿真步长限制。 -->
-      <update_rate>100.0</update_rate>
+      <update_rate>1000.0</update_rate> <!-- 与 0.001 s 物理步一致，避免接触摩擦在更新间隔内削弱转向。 -->
       <!-- 里程计与 TF 发布频率，单位 Hz，不必等于物理更新频率。 -->
       <publish_rate>50.0</publish_rate>
       <!-- 输出 nav_msgs/Odometry，后续规划器和跟踪器使用这份反馈。 -->

@@ -35,7 +35,7 @@ def generate_launch_description():  # ROS 2 launch 入口。
                                     'drone_id': '0', 
                                     'max_vel': '0.25', 
                                     'max_acc': '0.4', 
-                                    'planning_horizon': '2.0', 
+                                    'planning_horizon': '5.0', 
                                     'use_distinctive_trajs': 'False', 
                                     'obj_num_set': '0'}.items()),  # 复用 EGO 状态机，低速调试平面重规划。
         Node( # 小车版直接采样轨迹并闭环输出 /cmd_vel。

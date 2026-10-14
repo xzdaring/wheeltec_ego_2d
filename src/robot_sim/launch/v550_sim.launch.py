@@ -15,6 +15,11 @@ def generate_launch_description():
     # 查安装后的资源目录；因此首次启动前必须 colcon build 并 source。
     sim_share = get_package_share_directory('robot_sim')
     gazebo_share = get_package_share_directory('gazebo_ros')
+    # 使用包内模型资源，同时保留用户原有搜索目录。
+    bundled_models = os.path.join(sim_share, 'models')
+    previous_models = os.environ.get('GAZEBO_MODEL_PATH', '')
+    model_path = os.pathsep.join(  # 包内资源优先，避免依赖个人缓存。
+        path for path in (bundled_models, previous_models) if path)
 
     # launch 参数允许更换世界、关闭 GUI 和调整出生位置，无需修改源码。
     world = LaunchConfiguration('world')
@@ -41,6 +46,8 @@ def generate_launch_description():
     robot_description = description.toxml()
 
     return LaunchDescription([
+        # Gazebo 的 model:// 引用从这些目录查找网格、材质和纹理。
+        SetEnvironmentVariable('GAZEBO_MODEL_PATH', model_path),
         # GUI 的模型面板默认会联网刷新模型库；网络慢时会卡在 Preparing your world。
         # 空 URI 禁用在线模型数据库，已保存的世界与本地模型仍可正常加载。
         # 若确实需要联网下载模型，可用 model_database_uri:=http://models.gazebosim.org/。
@@ -50,7 +57,7 @@ def generate_launch_description():
                                LaunchConfiguration('model_database_uri')),
         # 默认使用你保存的世界；也可 world:=/绝对路径/其他.world。
         DeclareLaunchArgument(
-            'world', default_value=os.path.join(sim_share, 'worlds', 'v550_test.world'),
+            'world', default_value=os.path.join(sim_share, 'worlds', 'ego_test_world2.world'),
             description='Gazebo world file'),
         # gui:=false 只运行服务器，适合无界面检查。
         DeclareLaunchArgument('gui', default_value='true', description='Start Gazebo GUI'),

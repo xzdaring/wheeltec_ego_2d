@@ -109,7 +109,9 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
         ty = tr.transform.translation.y  # 变换的 Y 平移。
         goal.pose.position.x = tx + math.cos(a) * x - math.sin(a) * y  # 目标 X。
         goal.pose.position.y = ty + math.sin(a) * x + math.cos(a) * y  # 目标 Y。
-        goal.pose.orientation.w = 1.0  # 当前只验收到达位置，保持车头角度不作为目标约束。
+        target_yaw = a + yaw_of(msg.pose.orientation)  # 目标朝向也从 map 转到 odom。
+        goal.pose.orientation.z = math.sin(target_yaw / 2.0)  # 平面四元数 Z。
+        goal.pose.orientation.w = math.cos(target_yaw / 2.0)  # 平面四元数 W。
         self.pending_goal = None  # 避免周期性重发导致规划器不断重置。
         self.goal_pub.publish(goal)  # 调用原 EGO 的手动目标和滚动状态机。
         self.get_logger().info('目标已转换到 odom 并交给 EGO。')  # 便于排查目标是否进入规划。

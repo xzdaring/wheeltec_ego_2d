@@ -66,7 +66,7 @@ ros2 launch robot_sim ego_navigation.launch.py
 关闭此前单独启动的 Gazebo、规划器和速度发布命令，避免重复实体或多个 `/cmd_vel` 发布者。
 默认出生在 `(1, 2)`，可通过 `x:=... y:=...` 调整到世界空地。
 等待 RViz 出现 `/map` 后，用工具栏 `2D Goal Pose` 在可达空地点击并拖动。
-当前验收到达位置，麦轮车保持现有朝向并允许横移，不使用点击箭头作为最终朝向约束。
+平移阶段保留麦轮横移能力；接近目标后原地转向，使用点击箭头作为最终朝向约束。
 
 真实链路：
 
@@ -120,7 +120,7 @@ control：按仿真时间求值 → 速度前馈加位置反馈 → 合速度限
 
 参数位于 `/ground_traj_server`：`kp_xy=0.8`、`max_speed=0.3`、
 `goal_tolerance=0.12`、`safety_radius=0.22`，距离单位 m，速度单位 m/s。
-保持前进和横移能力；当前仍保持车头朝向，不额外加入加速度限制和最终朝向控制。
+保持前进和横移能力；最终朝向控制使用最短角差，尚未加入加速度限制。
 节点关闭时发送零速度属于尽力操作，底盘插件没有速度看门狗时不能保证进程崩溃后自动停车。
 
 重新构建后，启动命令不变：
@@ -147,3 +147,45 @@ ros2 launch robot_sim ego_navigation.launch.py
 峰值速度为曲线采样有限差分估计值，不能替代动力学可行性检查。
 可在 RViz 的 Displays 中关闭白色控制点或膨胀图层以减少遮挡。
 全局参考由显示节点缓存重发，RViz 晚打开仍能看到；显示节点必须在目标下发前运行。
+
+## 边界墙修复与最终朝向
+
+本工作区新增 Humble 版 `src/slam_toolbox`，只修改 Karto 地图宽高计算：
+向上取整后加一格，保留最大 X/Y 边界的激光命中。系统 /opt/ros 安装不变。
+源码版本与修改说明见 `src/slam_toolbox/LOCAL_PATCHES.md`。
+
+```zsh
+source /opt/ros/humble/setup.zsh
+CMAKE_BUILD_PARALLEL_LEVEL=2 MAKEFLAGS=-j2 colcon build --packages-up-to robot_sim --parallel-workers 2 --allow-overriding slam_toolbox --cmake-args -DBUILD_TESTING=OFF
+source install/setup.zsh
+ros2 pkg prefix slam_toolbox
+ros2 launch robot_sim ego_navigation.launch.py
+```
+
+包前缀应为当前工作区的 `install/slam_toolbox`；旧进程必须关闭再启动才会使用新库。
+已录制包中的旧 `/map` 不会自动改变，验证修复需要用原雷达与 odom TF 重新运行 SLAM。
+
+RViz 点击拖动箭头后，位置与四元数同时转换到 odom。
+小车先平移接近目标，再原地转向；最终位置容差 0.12 m，角度容差 0.05 rad（约 2.9°）。
+转向阶段以更小的位置误差进入并保留滞回，避免平移/转向反复切换。
+朝向参数：`kp_yaw=1.5`、`max_yaw_rate=0.6` rad/s、`yaw_tolerance=0.05` rad。
+障碍包络内有雷达命中时禁止旋转，感知中断仍会停车。
+紫色目标箭头显示已经变换后的最终方向。
+
+平面底盘插件更新率现为 1000 Hz，与世界 0.001 s 物理步对应，
+减少直接速度设定之间轮地摩擦对转向的削弱；它仍是简化平面模型，
+不用于验证真实麦轮接触、轮速或打滑。
+EGO 最终曲线自由末端可有少量位置偏差，因此最后一小段增加到点击位置的反馈收敛，
+仅在轨迹结束且末端距最终目标小于 0.24 m 时启用，并保留雷达停车检查。
+
+## ego_test_world2 的离线模型资源
+
+`.world` 保存模型位姿与描述，但 `model://...` 引用的网格、材质和纹理需要单独存在。
+本包已收录该世界用到的六类资源：纸箱、咖啡桌、车轮、易拉罐、垃圾桶和大理石桌。
+资源位于 `models/`，来源版本记录在 `models/SOURCES.md`，随 robot_sim 一起安装。
+启动文件将安装后的 models 目录加入 GAZEBO_MODEL_PATH，保留用户已有目录。
+无需依赖个人 ~/.gazebo 缓存或开启在线模型数据库。
+
+新增或修改模型资源后构建 `robot_sim`，关闭旧 Gazebo，再 source 和重新启动。
+只重启界面、继续连接旧 gzserver，不会重新加载世界和新资源。
+若直接运行 gazebo 命令而不使用 launch，需要自行设置 GAZEBO_MODEL_PATH。

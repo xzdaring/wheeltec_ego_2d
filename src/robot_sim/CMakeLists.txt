@@ -6,7 +6,7 @@ project(robot_sim)
 find_package(ament_cmake REQUIRED)
 
 # 安装启动、机器人和世界资源，使 ros2 launch 能从安装目录找到它们。
-install(DIRECTORY launch urdf worlds config # 同时安装在线建图参数和 RViz 配置。
+install(DIRECTORY launch urdf worlds config models # 同时安装在线建图参数和 RViz 配置。
   DESTINATION share/${PROJECT_NAME}
 )
 

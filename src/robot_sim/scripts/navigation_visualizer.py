@@ -72,6 +72,12 @@ class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或�
         marker = self.marker('final_goal', Marker.SPHERE, (1.0, 0.2, 0.8), 0.18)
         marker.pose.position = msg.pose.position  # odom 中的实际目标位置。
         self.items['goal'] = marker  # 紫色球表示最终目标。
+        arrow = self.marker(  # 紫色箭头显示用户指定的最终朝向。
+            'final_heading', Marker.ARROW, (1.0, 0.2, 0.8), 0.1)
+        arrow.pose = msg.pose  # 使用已转换到 odom 的完整目标位姿。
+        arrow.scale.x = 0.4  # 朝向箭头长度 m。
+        arrow.scale.y = arrow.scale.z = 0.08  # 头部与杆的显示宽度。
+        self.items['heading'] = arrow  # 与最终位置球同时显示。
 
     def on_reference(self, msg):  # 黄色小球表示当前跟踪参考。
         marker = self.marker('current_reference', Marker.SPHERE, (1.0, 0.9, 0.0), 0.09)
