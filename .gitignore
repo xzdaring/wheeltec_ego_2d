@@ -2,6 +2,6 @@ build/
 install/
 log/
 .vscode/
-bag2/
+bags/
 diagnostics/
 
