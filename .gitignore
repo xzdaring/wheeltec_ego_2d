@@ -1,7 +1,11 @@
+bags/
 build/
+diagnostics/
 install/
 log/
 .vscode/
-bags/
-diagnostics/
+*.db3
+*.mcap
+rosbag2_*/
+bag*/
 

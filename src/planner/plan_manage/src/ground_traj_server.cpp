@@ -10,6 +10,7 @@
 #include <nav_msgs/msg/odometry.hpp> // 位置反馈。
 #include <sensor_msgs/msg/laser_scan.hpp> // 近障停车输入。
 #include <sensor_msgs/msg/point_cloud2.hpp> // 感知链路看门狗。
+#include <sensor_msgs/point_cloud2_iterator.hpp> // 读取膨胀点云的坐标字段。
 #include <quadrotor_msgs/msg/position_command.hpp> // 保留期望状态供调试。
 #include <traj_utils/msg/bspline.hpp> // 原 EGO 轨迹消息。
 #include <bspline_opt/uniform_bspline.h> // 复用原 EGO 的 B 样条求值。
@@ -39,6 +40,12 @@ public:
       "/ego/cloud", 10, [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr) {
         cloud_time_ = now().seconds(); // 桥只发布新鲜地图产生的点云。
       });
+    
+    inflated_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>( // 接收规划器实际使用的禁行区。
+      "/drone_0_grid/grid_map/occupancy_inflate", 1, // 只保留最新地图，避免处理积压。
+      [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr m) { // 收到地图后更新缓存。
+        onInflated(*m); // 坐标已经在 odom 中，不再重复变换。
+      }); // 保存订阅器，确保回调持续生效。
     click_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/goal_pose", 10, [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr) {
         active_ = have_goal_ = aligning_ = false; // 点击新目标立即废弃旧目标。
@@ -136,6 +143,48 @@ private:
     }
     scan_time_ = now().seconds(); // 仅有效变换后的扫描刷新时间。
   }
+  void onInflated(const sensor_msgs::msg::PointCloud2 &m) // 更新膨胀栅格缓存。
+  {
+    if (m.header.frame_id != "odom") return; // 坐标不一致时不刷新地图。
+
+    inflated_points_.clear(); // 每帧替换，避免已经消失的障碍残留。
+    sensor_msgs::PointCloud2ConstIterator<float> x(m, "x"); // 读取栅格中心 x。
+    sensor_msgs::PointCloud2ConstIterator<float> y(m, "y"); // 读取栅格中心 y。
+    sensor_msgs::PointCloud2ConstIterator<float> z(m, "z"); // 选择规划平面附近的栅格。
+
+    for (; x != x.end(); ++x, ++y, ++z) // 同步遍历三个坐标字段。
+    {
+      if (!std::isfinite(*x) || !std::isfinite(*y) || // 排除无效水平坐标。
+          !std::isfinite(*z)) continue; // 排除无效高度。
+      if (std::abs(*z) > grid_resolution_ * 0.51) continue; // 保留 z=0 邻近层。
+      inflated_points_.emplace_back(*x, *y); // 保存 odom 下的禁行栅格中心。
+    }
+
+    inflated_time_ = now().seconds(); // 空地图也有效，因此仍更新时间。
+  }
+
+  bool blockedByMap(double vx, double vy) const // 输入必须是 odom 下的速度。
+  {
+    const auto &p = odom_.pose.pose.position; // 从实际车位开始预测。
+    const double half = grid_resolution_ * 0.5 + 0.01; // 栅格半宽加 1 cm 余量。
+
+    for (int i = 0; i <= 12; ++i) // 检查当前到未来 0.6 秒的位置。
+    {
+      const double t = i * 0.05; // 每 50 ms 检查一次，缩小采样间隙。
+      const double x = p.x + vx * t; // 按当前候选速度预测中心 x。
+      const double y = p.y + vy * t; // 同时预测横移，保留全向运动。
+
+      for (const auto &cell : inflated_points_) // 检查预测中心是否进入禁行格。
+      {
+        if (std::abs(x - cell.x()) <= half && // 判断是否进入栅格的 x 范围。
+            std::abs(y - cell.y()) <= half) // 判断是否同时进入 y 范围。
+          return true; // 预测进入膨胀区，拒绝该速度。
+      }
+    }
+
+    return false; // 当前候选速度没有进入已知膨胀栅格。
+  }
+
 
   bool blocked(double vx, double vy) const
   {
@@ -149,8 +198,10 @@ private:
   void control()
   {
     const double time = now().seconds(); // 进度与超时都使用节点仿真时间。
-    const bool fresh = time - odom_time_ < 0.5 &&
-      time - scan_time_ < 0.5 && time - cloud_time_ < 0.7;
+    const bool fresh = time - odom_time_ < 0.5 && // 里程计必须持续更新。
+      time - scan_time_ < 0.5 && // 雷达必须持续更新。
+      time - cloud_time_ < 0.7 && // 在线建图链路必须正常。
+      time - inflated_time_ < 0.5; // 膨胀地图中断时也停车。
     if (!have_goal_ || !fresh) // 到点转向不依赖新的平移轨迹。
     {
       stop(); // 等待目标、轨迹或感知时都主动输出零速度。
@@ -167,7 +218,8 @@ private:
       geometry_msgs::msg::Twist turn; // 到点后平移归零，仅调整朝向。
       if (std::abs(angle) > yaw_tolerance_) // 角度未满足则保持导航状态。
       {
-        if (!blocked(0.0, 0.0)) // 圆形包络内有障碍时禁止原地旋转。
+        if (!blocked(0.0, 0.0) && // 雷达确认圆形包络内没有障碍。
+            !blockedByMap(0.0, 0.0)) // 当前中心也必须位于膨胀禁行区外。 // 圆形包络内有障碍时禁止原地旋转。
           turn.angular.z = std::clamp(yaw_gain_ * angle,
             -max_yaw_rate_, max_yaw_rate_); // 限制角速度，保留最短旋转方向。
       }
@@ -209,8 +261,11 @@ private:
     geometry_msgs::msg::Twist cmd; // 角速度默认零，保持现有朝向。
     cmd.linear.x = std::cos(a) * vx + std::sin(a) * vy;
     cmd.linear.y = -std::sin(a) * vx + std::cos(a) * vy;
-    if (blocked(cmd.linear.x, cmd.linear.y))
-      cmd = geometry_msgs::msg::Twist(); // 近障立即停车，等待状态机重规划。
+    if (blocked(cmd.linear.x, cmd.linear.y) || // 雷达检查使用车体坐标速度。
+        blockedByMap(vx, vy)) // 膨胀地图检查使用 odom 坐标速度。
+    {
+      cmd = geometry_msgs::msg::Twist(); // 任一检查预测碰撞就停止。
+    }
     velocity_pub_->publish(cmd); // 此节点是导航链唯一速度发布者。
   }
 
@@ -233,6 +288,10 @@ private:
   nav_msgs::msg::Odometry odom_; // 保存完整姿态反馈。
   geometry_msgs::msg::Point goal_; // 最终位置目标。
   std::vector<Eigen::Vector2d> scan_points_; // 车体坐标下的障碍。
+  std::vector<Eigen::Vector2d> inflated_points_; // odom 下的膨胀栅格中心。
+  double inflated_time_ = -100.0; // 未收到膨胀地图前保持停车。
+  double grid_resolution_ = 0.1; // 与 EGO 的 grid_map/resolution 保持一致。
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr inflated_sub_; // 保持订阅器存活。
   bool aligning_ = false; // 最终朝向阶段的滞回状态。
   bool active_ = false, have_goal_ = false; // 默认禁止运动。
   int64_t last_id_ = -1, required_id_ = -1; // 区分连续目标。
