@@ -35,6 +35,8 @@ public:
     yaw_gain_ = declare_parameter("kp_yaw", 1.5); // 到点后的角度反馈增益。
     max_yaw_rate_ = declare_parameter("max_yaw_rate", 0.6); // 转向限速 rad/s。
     yaw_tolerance_ = declare_parameter("yaw_tolerance", 0.05); // 朝向容差 rad。
+    follow_yaw_ = declare_parameter("follow_trajectory_yaw", true); // 默认沿轨迹转动车头。
+    yaw_lookahead_ = declare_parameter("yaw_lookahead", 0.3); // 提前看 0.3 s，减轻弯道滞后。
     radius_ = declare_parameter("safety_radius", 0.22);
     // 所有订阅器保存在成员中，避免构造结束后被释放。
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -122,6 +124,7 @@ private:
     position_ = ego_planner::UniformBspline(points, m.order, 0.1);
     position_.setKnot(knots); // 临时间隔由消息节点向量覆盖。
     velocity_ = position_.getDerivative(); // 解析求导获得速度前馈。
+    acceleration_ = velocity_.getDerivative(); // 曲线加速度用于计算切线转动速度。
     start_time_ = start; // 与当前节点的仿真时钟同源。
     duration_ = position_.getTimeSum(); // 末端后保持位置、速度归零。
     active_ = duration_ > 0.0; // 只有有效轨迹才解除停车。
@@ -170,7 +173,16 @@ private:
     inflated_time_ = now().seconds(); // 空地图也有效，因此仍更新时间。
   }
 
-  bool blockedByMap(double vx, double vy) const // 输入必须是 odom 下的速度。
+  static Eigen::Vector2d motionOffset( // 同时平移和旋转时，中心沿圆弧运动。
+    double vx, double vy, double wz, double t) // 速度表达在预测起点的坐标轴下。
+  {
+    if (std::abs(wz) < 1e-6) return {vx * t, vy * t}; // 小角速度退化为直线。
+    const double s = std::sin(wz * t) / wz; // 积分旋转后的前向速度。
+    const double c = (1.0 - std::cos(wz * t)) / wz; // 积分旋转后的横向速度。
+    return {s * vx - c * vy, c * vx + s * vy}; // 支持麦轮横移的恒定 Twist 预测。
+  }
+
+  bool blockedByMap(double vx, double vy, double wz = 0.0) const // 输入为规划坐标速度。
   {
     const auto &p = odom_.pose.pose.position; // 从实际车位开始预测。
     const double half = grid_resolution_ * 0.5 + 0.01; // 栅格半宽加 1 cm 余量。
@@ -178,8 +190,9 @@ private:
     for (int i = 0; i <= 12; ++i) // 检查当前到未来 0.6 秒的位置。
     {
       const double t = i * 0.05; // 每 50 ms 检查一次，缩小采样间隙。
-      const double x = p.x + vx * t; // 按当前候选速度预测中心 x。
-      const double y = p.y + vy * t; // 同时预测横移，保留全向运动。
+      const auto offset = motionOffset(vx, vy, wz, t); // 计入转向引起的圆弧位移。
+      const double x = p.x + offset.x(); // 在规划坐标下预测中心 x。
+      const double y = p.y + offset.y(); // 同时预测横移，保留全向运动。
 
       for (const auto &cell : inflated_points_) // 检查预测中心是否进入禁行格。
       {
@@ -193,13 +206,44 @@ private:
   }
 
 
-  bool blocked(double vx, double vy) const
+  bool blocked(double vx, double vy, double wz = 0.0) const // 速度表达在当前车体坐标中。
   {
-    for (const auto &p : scan_points_)
-      for (const double t : {0.0, 0.2, 0.4, 0.6})
-        if (std::hypot(p.x() - vx * t, p.y() - vy * t) < radius_)
-          return true; // 短期扫掠圆形车体，覆盖横移方向。
+    for (const double t : {0.0, 0.2, 0.4, 0.6}) // 保留原来的短期预测范围。
+    {
+      const auto offset = motionOffset(vx, vy, wz, t); // 先计算该时刻的圆弧位移。
+      for (const auto &p : scan_points_) // 雷达点和预测位移使用同一坐标系。
+        if ((p - offset).norm() < radius_) // 外接圆包络同时覆盖平移与转向。
+          return true; // 预测车体包络碰到真实障碍，拒绝整个速度指令。
+    }
     return false; // 当前雷达未检测到短期碰撞。
+  }
+
+  void followHeading(double t, bool final_approach, // 最终小范围收敛单独选择朝向。
+    double &vx, double &vy, geometry_msgs::msg::Twist &cmd) // 同步调整平移和角速度。
+  {
+    if (!follow_yaw_) return; // 可恢复原来的全向平移方式，最终朝向仍然有效。
+    const double future = std::min(duration_, t + std::max(0.0, yaw_lookahead_)); // 预瞄不越界。
+    Eigen::Vector3d direction = velocity_.evaluateDeBoorT(future); // 采用真实曲线切线。
+    double feed_yaw = 0.0; // 静止或末端收敛时不使用曲率前馈。
+    if (final_approach) direction = Eigen::Vector3d(vx, vy, 0.0); // 朝剩余位置误差前进。
+    else if (direction.head<2>().squaredNorm() >= 1e-4) // 低速时避免除法放大噪声。
+    {
+      const auto acc = acceleration_.evaluateDeBoorT(future); // 取同一时刻的加速度。
+      feed_yaw = (direction.x() * acc.y() - direction.y() * acc.x()) // 切线角速度分子。
+        / direction.head<2>().squaredNorm(); // d atan2(vy,vx)/dt，单位 rad/s。
+      feed_yaw = std::clamp(feed_yaw, -max_yaw_rate_, max_yaw_rate_); // 限制曲率前馈。
+    }
+    else direction = position_.evaluateDeBoorT(future) // 起步速度为零时看前方曲线。
+      - position_.evaluateDeBoorT(t); // 用短弦方向补充切线，避免 atan2(0,0)。
+    if (direction.head<2>().squaredNorm() < 1e-8) return; // 急停常值轨迹不触发转向。
+    reference_yaw_ = std::atan2(direction.y(), direction.x()); // 车头沿轨迹前进方向。
+    const double delta = reference_yaw_ - yaw(odom_.pose.pose.orientation); // 实际车头误差。
+    const double error = std::atan2(std::sin(delta), std::cos(delta)); // 跨过 ±π 也走短角。
+    const double scale = std::max(0.0, std::cos(error)); // 偏差越大越慢，超过 90°先转向。
+    vx *= scale; // 同比例降低规划坐标下的速度，保留路径纠偏方向。
+    vy *= scale; // 保留横移能力，不强行把车改为非完整约束底盘。
+    cmd.angular.z = std::clamp(scale * feed_yaw + yaw_gain_ * error, // 前馈加角度反馈。
+      -max_yaw_rate_, max_yaw_rate_); // 行驶转向与最终对齐共用角速度上限。
   }
 
   void control()
@@ -235,6 +279,10 @@ private:
         active_ = have_goal_ = false; // 下一次点击重新启动。
         RCLCPP_INFO(get_logger(), "位置与最终朝向均已到达，已停车。");
       }
+      reference_yaw_ = goal_yaw_; // 最终朝向优先于轨迹切线。
+      reference_yaw_rate_ = turn.angular.z; // 调试输出对应实际下发的转向速度。
+      publishReference(Eigen::Vector3d(goal_.x, goal_.y, 0.0), // 显示最终位置要求。
+        Eigen::Vector3d::Zero()); // 原地对齐阶段期望平移速度为零。
       velocity_pub_->publish(turn); // 旋转、等待或完成都显式发布速度。
       return;
     }
@@ -257,7 +305,6 @@ private:
     Eigen::Vector3d feed = velocity_.evaluateDeBoorT(t); // 直接复用轨迹导数。
     if (time - start_time_ >= duration_)
       feed.setZero(); // 超出轨迹时长后仅靠位置反馈收敛到末端。
-    publishReference(target, feed); // 保留可观察的期望位置和速度。
     double vx = feed.x() + kp_ * (target.x() - p.x);
     double vy = feed.y() + kp_ * (target.y() - p.y);
     const double scale = std::min(1.0,
@@ -265,14 +312,18 @@ private:
     vx *= scale; // 前后与横移同比例缩放，保持运动方向。
     vy *= scale; // 防止对角移动超速。
     const double a = yaw(odom_.pose.pose.orientation);
-    geometry_msgs::msg::Twist cmd; // 角速度默认零，保持现有朝向。
+    reference_yaw_ = a; // 无有效切线或关闭跟随时，以当前车头作为调试参考。
+    geometry_msgs::msg::Twist cmd; // 从零角速度开始计算本周期转向。
+    followHeading(t, ended && final_segment, vx, vy, cmd); // 跟随切线并按角差减速。
     cmd.linear.x = std::cos(a) * vx + std::sin(a) * vy;
     cmd.linear.y = -std::sin(a) * vx + std::cos(a) * vy;
-    if (blocked(cmd.linear.x, cmd.linear.y) || // 雷达检查使用车体坐标速度。
-        blockedByMap(vx, vy)) // 膨胀地图检查使用 odom 坐标速度。
+    if (blocked(cmd.linear.x, cmd.linear.y, cmd.angular.z) || // 雷达检查弧线扫掠。
+        blockedByMap(vx, vy, cmd.angular.z)) // 膨胀地图检查使用规划坐标速度。
     {
       cmd = geometry_msgs::msg::Twist(); // 任一检查预测碰撞就停止。
     }
+    reference_yaw_rate_ = cmd.angular.z; // 近障停车后，调试角速度也应归零。
+    publishReference(target, feed); // 同时发布位置、速度和车头参考，便于检查。
     velocity_pub_->publish(cmd); // 此节点是导航链唯一速度发布者。
   }
 
@@ -285,6 +336,8 @@ private:
     ref.position.y = p.y(); // 高度默认零。
     ref.velocity.x = v.x(); // 水平速度前馈。
     ref.velocity.y = v.y(); // 横移速度前馈。
+    ref.yaw = reference_yaw_; // 输出期望车头，方便和里程计姿态对比。
+    ref.yaw_dot = reference_yaw_rate_; // 输出控制器下发的角速度，单位 rad/s。
     ref.trajectory_id = last_id_; // 对应当前轨迹编号。
     reference_pub_->publish(ref); // 不再依赖此消息闭环控制。
   }
@@ -293,6 +346,7 @@ private:
   tf2_ros::Buffer buffer_; // 与节点时钟绑定的 TF 缓冲。
   tf2_ros::TransformListener listener_; // 生命周期覆盖整个节点。
   ego_planner::UniformBspline position_, velocity_; // 位置曲线及其导数。
+  ego_planner::UniformBspline acceleration_; // 切线角速度前馈所需的二阶导数。
   nav_msgs::msg::Odometry odom_; // 保存完整姿态反馈。
   geometry_msgs::msg::Point goal_; // 最终位置目标。
   std::vector<Eigen::Vector2d> scan_points_; // 车体坐标下的障碍。
@@ -306,6 +360,9 @@ private:
   double goal_time_ = 0.0, start_time_ = 0.0, duration_ = 0.0;
   double odom_time_ = -100.0, scan_time_ = -100.0, cloud_time_ = -100.0;
   double goal_yaw_ = 0.0; // 已变换到 odom 的最终朝向。
+  bool follow_yaw_ = true; // 行驶时沿轨迹切线控制车头。
+  double yaw_lookahead_ = 0.3; // 切线预瞄时间，单位秒。
+  double reference_yaw_ = 0.0, reference_yaw_rate_ = 0.0; // 调试输出的角度与角速度。
   double yaw_gain_, max_yaw_rate_, yaw_tolerance_; // 到点原地转向参数。
   double kp_, max_speed_, tolerance_, radius_; // 控制与停车参数。
   rclcpp::TimerBase::SharedPtr timer_; // 保持控制周期回调存活。

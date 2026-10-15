@@ -28,6 +28,9 @@ def generate_launch_description():
         DeclareLaunchArgument('scan_topic', default_value='/scan'),
         DeclareLaunchArgument('enable_motion', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('rviz', default_value='false'),
+        DeclareLaunchArgument('follow_trajectory_yaw', default_value='true', # 默认车头沿轨迹走。
+                              choices=['true', 'false']), # 可关闭行驶转向，保留最终对齐。
+        DeclareLaunchArgument('yaw_lookahead', default_value='0.3'), # 切线预瞄时间，单位秒。
         DeclareLaunchArgument('start_slam', default_value='true'),
         DeclareLaunchArgument('safety_radius', default_value='0.25',
                               description='车体平面外接圆半径加余量，按实物测量调整'),
@@ -45,7 +48,11 @@ def generate_launch_description():
                               'use_distinctive_trajs': 'False', 'obj_num_set': '0'}.items()),
         Node(package='ego_planner', executable='ground_traj_server', name='ground_traj_server',
              parameters=[{'use_sim_time': False, 'planning_frame': frame, 'base_frame': base,
-                          'max_speed': 0.15, 'max_yaw_rate': 0.25,
+                          'max_speed': 0.15, 'max_yaw_rate': 0.25, # 实车保持原有低速上限。
+                          'follow_trajectory_yaw': ParameterValue( # 显式转换布尔 launch 参数。
+                              LaunchConfiguration('follow_trajectory_yaw'), value_type=bool), # 允许切换。
+                          'yaw_lookahead': ParameterValue( # 预瞄时间需要作为浮点参数传入。
+                              LaunchConfiguration('yaw_lookahead'), value_type=float), # 避免字符串类型。
                           'safety_radius': ParameterValue(LaunchConfiguration('safety_radius'), value_type=float)}],
              remappings=remaps + [('/cmd_vel', output)], output='screen'),
         Node(package='robot_sim', executable='ego_navigation_bridge.py',

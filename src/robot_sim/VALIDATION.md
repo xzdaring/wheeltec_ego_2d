@@ -93,3 +93,14 @@ ego_planner 单包构建成功，git diff --check 通过。
 - 预览速度出现非零值，合速度最大 0.15 m/s；/cmd_vel 收到消息数量为零。
 - 停止注入里程计后，预览线速度和角速度归零；Ctrl+C 后 ground_traj_server 正常退出。
 - 本电脑缺少 robot_localization，未启动实际 EKF/N10P/底盘；上述结果不代表实车闭环行驶验收。
+
+## 2026-10-15 轨迹切线朝向控制验证
+
+- `ego_planner`、`robot_sim` 构建成功，实车入口 `--show-args`、Python 语法和 `git diff --check` 通过。
+- 独立 ROS 域 89/91，仅启动轨迹跟踪器，注入合成 B 样条、里程计、雷达和膨胀地图，速度重映射到 `/heading_test/cmd`。
+- 13 项行为检查通过：直线对齐、90°偏差先转向、沿 y 轨迹时车体前进、±π 最短转角、弯道曲率前馈、雷达弧线近障停车、膨胀栅格停车、常值急停不转向、最终点击角度优先、到点停车、里程计超时停车、关闭跟随保留横移、关闭跟随仍执行最终对齐。
+- 直线对齐输出前向速度 0.12 m/s；±π 跨界测试角速度约 0.05236 rad/s；所有测试合速度不超过 0.15 m/s、角速度不超过 0.25 rad/s。
+- 理想平面底盘闭环测试：从 yaw=0 沿 y 方向到达 0.6 m 目标，最终要求 yaw=-π/2；位置误差约 0.05786 m，角度误差约 0.04736 rad，完成后线速度和角速度均为零。
+- 独立 ROS 域 90 启动实车入口预览模式，关闭 SLAM/RViz，注入合成反馈；收到 11 条 B 样条，预览角速度最大 0.25 rad/s，停止里程计后停车，`/cmd_vel` 收到消息数量为零。
+- 临时验证脚本为 `/tmp/test_ground_heading.py`、`/tmp/test_ground_heading_loop.py`、`/tmp/test_ground_heading_disabled.py`、`/tmp/test_ego_real_heading.py`。
+- 未打开实车串口，未进行 Gazebo 接触动力学或真实车辆行驶验证；理想底盘结果不能证明急弯、轮胎打滑及物理车头标定后的实际效果。

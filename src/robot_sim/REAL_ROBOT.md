@@ -119,6 +119,10 @@ ros2 topic info /cmd_vel --verbose
 
 /cmd_vel 应只有 ground_traj_server 一个发布者。点击近处空地目标后才会运动。
 首次执行限合速度 0.15 m/s、角速度 0.25 rad/s，x/y 共同限速，保留麦轮横移。
+行驶时默认车头跟随 B 样条切线，预瞄时间为 0.3 s；朝向偏差大时降低平移速度，超过 90° 时先转向。
+到点后仍使用 RViz 点击箭头作为最终朝向要求，横移用于位置纠偏。
+可添加 `yaw_lookahead:=0.5` 调整预瞄时间；添加 `follow_trajectory_yaw:=false` 可关闭行驶转向，最终对齐仍有效。
+在预览模式下，如果车头与轨迹方向相差很大，出现以角速度为主的输出是预期行为；车不实际转动时，不能用此模式验证朝向收敛。
 如沿用小车已有 SLAM：加 `start_slam:=false`，仍需其发布 /map 和 map->odom_combined。
 也可覆盖 odom_topic、planning_frame、base_frame、scan_topic；frame 必须与消息一致，不能只改名字。
 
