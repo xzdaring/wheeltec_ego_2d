@@ -23,6 +23,7 @@ def yaw_of(q):  # 仿真底盘按平面运动处理四元数。
 class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制交给 C++。
     def __init__(self):  # 构造时创建接口，所有状态由回调更新。
         super().__init__('ego_navigation_bridge')  # 与 launch 中的节点名称保持一致。
+        self.planning_frame = self.declare_parameter('planning_frame', 'odom').value
         self.buffer = Buffer()  # 保存 map、odom、laser 和 base_link 的变换历史。
         self.listener = TransformListener(self.buffer, self)  # 保留监听器，防止离开作用域后停止接收 TF。
         self.map = self.odom = None  # 地图和里程计未就绪时不生成点云。
@@ -50,6 +51,10 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
         self.map_time = self.seconds()  # 地图停止更新时控制器会停车。
 
     def on_odom(self, msg):  # 底盘位姿始终以 odom 为规划参考。
+        if msg.header.frame_id != self.planning_frame:
+            self.get_logger().error('里程计 frame 与 planning_frame 不一致，拒绝输入。')
+            self.odom = None
+            return
         self.odom = msg  # 保留 yaw 和 x/y 的原始反馈。
 
 
@@ -64,7 +69,7 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
             return  # 未就绪时不发布误导性的空地图。
         try:  # map 会随 SLAM 优化变化，因此每次重新查询。
             tr = self.buffer.lookup_transform(  # 地图修正可能持续变化。
-                'odom', self.map.header.frame_id, Time())  # 查询最新变换。
+                self.planning_frame, self.map.header.frame_id, Time())  # 查询最新变换。
         except TransformException:  # 初始 SLAM 尚未发布 map 到 odom 时等待。
             return  # 不使用伪造的单位变换。
         cells = np.asarray(self.map.data).reshape(  # 恢复二维栅格。
@@ -84,7 +89,7 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
         height = np.zeros(np.count_nonzero(keep))  # 障碍平铺到 z=0。
         points = np.column_stack((ox[keep], oy[keep], height))  # 三维点云接口。
         header = Header(  # 点云已经完成真实坐标转换。
-            frame_id='odom',  # 与小车规划坐标一致。
+            frame_id=self.planning_frame,  # 与小车规划坐标一致。
             stamp=self.get_clock().now().to_msg())  # 仿真时间。
         self.cloud.publish(create_cloud_xyz32(header, points.tolist()))  # 即使无障碍也刷新局部占据地图。
         if self.pending_goal is not None and self.seconds() - self.map_time < 3.0:  # 地图有效后才允许目标下发。
@@ -92,18 +97,18 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
 
     def send_goal(self):  # 将 RViz map 目标转换为 EGO odom 目标。
         msg = self.pending_goal  # 新目标覆盖旧待处理目标。
-        if msg.header.frame_id not in ('map', 'odom'):  # 本入口仅接受已定义的导航坐标系。
+        if msg.header.frame_id not in ('map', self.planning_frame):  # 本入口仅接受已定义的导航坐标系。
             self.get_logger().error('目标坐标系必须为 map 或 odom。')  # 防止静默使用错误坐标。
             self.pending_goal = None  # 明确拒绝，等待用户重新点击。
             return  # 保持停车。
         try:  # 使用最新定位修正解释当前点击的目标。
-            tr = self.buffer.lookup_transform('odom', msg.header.frame_id, Time())  # odom 目标自然得到单位变换。
+            tr = self.buffer.lookup_transform(self.planning_frame, msg.header.frame_id, Time())  # odom 目标自然得到单位变换。
         except TransformException:  # 地图与底盘尚未连通时保留目标。
             return  # 后续地图定时器继续重试。
         a = yaw_of(tr.transform.rotation)  # 平面目标只需要 yaw 旋转。
         x, y = msg.pose.position.x, msg.pose.position.y  # 读取点击位置，不采用三维高度。
         goal = PoseStamped()  # 为 EGO 创建独立的目标消息。
-        goal.header.frame_id = 'odom'  # 输入已经完成真实坐标变换。
+        goal.header.frame_id = self.planning_frame  # 输入已经完成真实坐标变换。
         goal.header.stamp = self.get_clock().now().to_msg()  # 与仿真轨迹开始时刻统一。
         tx = tr.transform.translation.x  # 变换的 X 平移。
         ty = tr.transform.translation.y  # 变换的 Y 平移。

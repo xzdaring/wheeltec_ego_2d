@@ -52,6 +52,11 @@
   <exec_depend>visualization_msgs</exec_depend>
   <!-- 参数文字通过 ROS 标准服务读取真实运行值。 -->
   <exec_depend>rcl_interfaces</exec_depend>
+  <!-- 实车入口使用底盘驱动、EKF、N10P 和关节状态发布。 -->
+  <exec_depend>turn_on_wheeltec_robot</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
+  <exec_depend>lslidar_driver</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
   <export>
     <!-- 告诉 colcon 使用 ament_cmake 处理本包。 -->
     <build_type>ament_cmake</build_type>

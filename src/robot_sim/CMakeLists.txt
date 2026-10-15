@@ -15,4 +15,5 @@ install(PROGRAMS # 安装导航适配和独立显示节点。
   scripts/ego_navigation_bridge.py # 地图与目标转换。
   scripts/navigation_visualizer.py # 曲线、行驶路径和参数文字。
   DESTINATION lib/${PROJECT_NAME}) # ros2 launch 的可执行查找目录。
+install(FILES REAL_ROBOT.md DESTINATION share/${PROJECT_NAME})
 ament_package()

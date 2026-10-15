@@ -1,3 +1,7 @@
+#include <csignal> // 先停车，再关闭 ROS 上下文。
+#include <chrono>
+#include <thread>
+#include <string>
 #include <algorithm> // clamp 用于限制轨迹求值时间。
 #include <cmath> // 平面旋转与圆形碰撞检查。
 #include <memory> // 智能指针保存 ROS 接口。
@@ -23,6 +27,8 @@ public:
     buffer_(get_clock()), listener_(buffer_)
   {
     // 参数集中定义，调参不需要进入控制公式。
+    planning_frame_ = declare_parameter<std::string>("planning_frame", "odom");
+    base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
     kp_ = declare_parameter("kp_xy", 0.8);
     max_speed_ = declare_parameter("max_speed", 0.3);
     tolerance_ = declare_parameter("goal_tolerance", 0.12);
@@ -33,6 +39,7 @@ public:
     // 所有订阅器保存在成员中，避免构造结束后被释放。
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom", 10, [this](nav_msgs::msg::Odometry::ConstSharedPtr m) {
+        if (m->header.frame_id != planning_frame_ || m->child_frame_id != base_frame_) return;
         odom_ = *m; // 位姿已经表达在 odom 中。
         odom_time_ = now().seconds(); // 反馈中断立即停车。
       });
@@ -55,7 +62,7 @@ public:
       "/move_base_simple/goal", 10,
       [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr m) {
         active_ = aligning_ = false; // 新目标必须等待新的规划结果。
-        have_goal_ = m->header.frame_id == "odom";
+        have_goal_ = m->header.frame_id == planning_frame_;
         goal_ = m->pose.position; // 位置与朝向都已经转换到 odom。
         goal_yaw_ = yaw(m->pose.orientation); // 保存点击箭头要求的最终朝向。
         goal_time_ = rclcpp::Time(m->header.stamp).seconds();
@@ -124,7 +131,7 @@ private:
   {
     geometry_msgs::msg::TransformStamped tr; // 保存雷达安装变换。
     try {
-      tr = buffer_.lookupTransform("base_link", m.header.frame_id,
+      tr = buffer_.lookupTransform(base_frame_, m.header.frame_id,
         rclcpp::Time(m.header.stamp)); // 按扫描时刻查询真实 TF。
     } catch (const tf2::TransformException &) {
       return; // 缺失 TF 不刷新看门狗，保持停车。
@@ -145,7 +152,7 @@ private:
   }
   void onInflated(const sensor_msgs::msg::PointCloud2 &m) // 更新膨胀栅格缓存。
   {
-    if (m.header.frame_id != "odom") return; // 坐标不一致时不刷新地图。
+    if (m.header.frame_id != planning_frame_) return; // 坐标不一致时不刷新地图。
 
     inflated_points_.clear(); // 每帧替换，避免已经消失的障碍残留。
     sensor_msgs::PointCloud2ConstIterator<float> x(m, "x"); // 读取栅格中心 x。
@@ -273,7 +280,7 @@ private:
   {
     quadrotor_msgs::msg::PositionCommand ref; // 仅用于可视化与调试。
     ref.header.stamp = now(); // 使用采样时刻。
-    ref.header.frame_id = "odom"; // 期望状态已经位于 odom。
+    ref.header.frame_id = planning_frame_; // 期望状态已经位于 odom。
     ref.position.x = p.x(); // 保留轨迹期望位置。
     ref.position.y = p.y(); // 高度默认零。
     ref.velocity.x = v.x(); // 水平速度前馈。
@@ -282,6 +289,7 @@ private:
     reference_pub_->publish(ref); // 不再依赖此消息闭环控制。
   }
 
+  std::string planning_frame_, base_frame_;
   tf2_ros::Buffer buffer_; // 与节点时钟绑定的 TF 缓冲。
   tf2_ros::TransformListener listener_; // 生命周期覆盖整个节点。
   ego_planner::UniformBspline position_, velocity_; // 位置曲线及其导数。
@@ -311,12 +319,28 @@ private:
   rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr reference_pub_;
 };
 
+namespace {
+volatile std::sig_atomic_t stop_requested = 0;
+void request_stop(int) { stop_requested = 1; } // 信号回调只置位，不调用 ROS API。
+}
+
 int main(int argc, char **argv)
 {
-  rclcpp::init(argc, argv); // 读取 ROS 参数和 use_sim_time。
-  auto node = std::make_shared<GroundTrajServer>(); // 创建小车版轨迹服务器。
-  rclcpp::spin(node); // 单线程避免目标、轨迹和反馈状态竞争。
-  if (rclcpp::ok()) node->stop(); // 上下文有效时尽力发送停车。
-  rclcpp::shutdown(); // 释放 ROS 资源。
-  return 0; // 正常退出。
+  // 默认 rclcpp 信号处理会立即关闭发布者，改为在主循环中先发送零速度。
+  rclcpp::init(argc, argv, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, request_stop);
+  std::signal(SIGTERM, request_stop);
+  auto node = std::make_shared<GroundTrajServer>();
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  while (rclcpp::ok() && !stop_requested)
+    executor.spin_once(std::chrono::milliseconds(10));
+  if (rclcpp::ok()) {
+    for (int i = 0; i < 3; ++i) {
+      node->stop(); // 保持上下文有效，尽力将停车消息送到底盘。
+      std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+  }
+  rclcpp::shutdown();
+  return 0;
 }

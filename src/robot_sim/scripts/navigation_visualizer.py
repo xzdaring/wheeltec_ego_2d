@@ -27,9 +27,10 @@ def evaluate(points, knots, degree, time):  # 与 EGO 相同的 B 样条求值�
 class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或导航目标。
     def __init__(self):  # 订阅全部显示所需信息。
         super().__init__('navigation_visualizer')  # 便于单独诊断。
+        self.planning_frame = self.declare_parameter('planning_frame', 'odom').value
         self.items = {}  # 每个命名空间保存最新标记，定期重发兼容晚开的 RViz。
         self.path = Path()  # 实际执行路径与期望轨迹分开显示。
-        self.path.header.frame_id = 'odom'  # 跟随真实里程计坐标。
+        self.path.header.frame_id = self.planning_frame  # 跟随真实里程计坐标。
         self.pose = Point()  # 信息文字放在小车旁边。
         self.details = '等待局部轨迹'  # 尚未规划时也显示状态。
         self.parameters = '等待规划器参数'  # 不用硬编码值冒充运行参数。
@@ -51,7 +52,7 @@ class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或�
 
     def marker(self, name, kind, color, size):  # 统一坐标、颜色和标记尺度。
         marker = Marker()  # 独立消息避免修改已经缓存的图层。
-        marker.header.frame_id = 'odom'  # 所有几何已经位于真实规划坐标系。
+        marker.header.frame_id = self.planning_frame  # 所有几何已经位于真实规划坐标系。
         marker.ns = name  # 分开控制点、曲线、目标和文字。
         marker.type = kind  # LINE_STRIP、POINTS、ARROW 或文字。
         marker.pose.orientation.w = 1.0  # 使用有效单位四元数。

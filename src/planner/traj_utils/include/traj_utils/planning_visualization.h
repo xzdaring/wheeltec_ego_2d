@@ -25,6 +25,7 @@ namespace ego_planner
   class PlanningVisualization
   {
   private:
+    std::string frame_;
     rclcpp::Node::SharedPtr node_; ///< 提供时钟、frame 配置和发布者生命周期的 ROS 2 节点。
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr goal_point_pub;   ///< 局部/最终目标点。
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr global_list_pub; ///< 全局参考轨迹采样。
@@ -39,6 +40,9 @@ namespace ego_planner
     PlanningVisualization(const rclcpp::Node::SharedPtr &node)
       : node_(node)
     {
+      if (!node_->has_parameter("planning_frame"))
+        node_->declare_parameter<std::string>("planning_frame", "odom");
+      frame_ = node_->get_parameter("planning_frame").as_string();
       // 初始化发布者，调整消息类型和队列大小
       goal_point_pub = node_->create_publisher<visualization_msgs::msg::Marker>("goal_point", 2);
       global_list_pub = node_->create_publisher<visualization_msgs::msg::Marker>("global_list", 2);

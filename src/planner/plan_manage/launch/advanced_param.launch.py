@@ -3,6 +3,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 """EGO-Planner 核心节点的统一参数与话题配置。
 
@@ -20,6 +21,8 @@ from launch_ros.actions import Node
 """
 
 def generate_launch_description():
+    use_sim_time = LaunchConfiguration('use_sim_time', default='true')
+    planning_frame = LaunchConfiguration('planning_frame', default='odom')
     # LaunchConfiguration 是“延迟求值”的启动参数占位符；真正值可能由
     # single_run_in_sim.py、run_in_sim.py 或命令行覆盖。
     # 名字末尾的下划线是原项目接口的一部分，不要随意去掉。
@@ -31,7 +34,7 @@ def generate_launch_description():
     odometry_topic = LaunchConfiguration('odometry_topic', default='odom')
     camera_pose_topic = LaunchConfiguration('camera_pose_topic', default='camera_pose')
     depth_topic = LaunchConfiguration('depth_topic', default='depth_image')
-    cloud_topic = LaunchConfiguration('cloud_topic', default='cloud')
+    cloud_topic = LaunchConfiguration('cloud_topic', default='/ego/cloud')
     
     # 针孔相机内参：cx/cy 为主点坐标，fx/fy 为像素焦距。
     cx = LaunchConfiguration('cx', default=321.04638671875)
@@ -119,7 +122,7 @@ def generate_launch_description():
         output='screen',
         remappings=[
             # 本机状态与规划结果：每架无人机使用独立前缀，避免同名冲突。
-            ('odom_world', '/odom'), 
+            ('odom_world', odometry_topic),
             ('planning/bspline', ['drone_', drone_id, '_planning/bspline']),
             ('planning/data_display', ['drone_', drone_id, '_planning/data_display']),
             # 所有无人机共享广播话题；FSM 收到后用 drone_id 忽略自身消息。
@@ -134,8 +137,8 @@ def generate_launch_description():
             ('a_star_list', ['drone_', drone_id, '_plan_vis/a_star_list']),
             
             # GridMap 的传感器输入和膨胀地图输出。
-            ('grid_map/odom', '/odom'),
-            ('grid_map/cloud', '/ego/cloud'), # 在线地图适配器已经把障碍转换到 odom。
+            ('grid_map/odom', odometry_topic),
+            ('grid_map/cloud', cloud_topic), # 在线地图适配器已经把障碍转换到 odom。
             ('grid_map/pose', ['drone_', drone_id, '_', camera_pose_topic]),
             ('grid_map/depth', ['drone_', drone_id, '_', depth_topic]),
             ('grid_map/occupancy_inflate', ['drone_', drone_id, '_grid/grid_map/occupancy_inflate'])
@@ -150,7 +153,7 @@ def generate_launch_description():
             {'fsm/emergency_time': 1.0},           # 预计 1 s 内碰撞则进入急停。
             {'fsm/realworld_experiment': False},   # False 时无需外部遥控触发。
             {'fsm/fail_safe': True},               # 急停稳定后允许自动恢复规划。
-            {'use_sim_time': True},
+            {'use_sim_time': ParameterValue(use_sim_time, value_type=bool)},
             
             # PRESET_TARGET 模式使用的世界坐标航点，单位 m。
             {'fsm/waypoint_num': point_num},
@@ -207,7 +210,8 @@ def generate_launch_description():
             {'grid_map/visualization_truncate_height': 1.8}, # RViz 显示截断高度，不等于规划上界。
             {'grid_map/show_occ_time': False},
             {'grid_map/pose_type': 1},                 # 1=PoseStamped；2=Odometry，见 GridMap 枚举。
-            {'grid_map/frame_id': "odom"},
+            {'grid_map/frame_id': planning_frame},
+            {'planning_frame': planning_frame},
             # ---------------- PlannerManager：轨迹尺度与物理限制 ----------------
             {'manager/max_vel': max_vel},              # 各轴最大速度，m/s。
             {'manager/max_acc': max_acc},              # 各轴最大加速度，m/s²。
@@ -243,7 +247,9 @@ def generate_launch_description():
     )
 
     # Create LaunchDescription
-    ld = LaunchDescription()
+    ld = LaunchDescription([
+        DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('planning_frame', default_value='odom')])
 
     # Add LaunchArguments
     ld.add_action(map_size_x_arg)

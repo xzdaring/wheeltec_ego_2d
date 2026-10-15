@@ -189,3 +189,7 @@ EGO 最终曲线自由末端可有少量位置偏差，因此最后一小段增�
 新增或修改模型资源后构建 `robot_sim`，关闭旧 Gazebo，再 source 和重新启动。
 只重启界面、继续连接旧 gzserver，不会重新加载世界和新资源。
 若直接运行 gazebo 命令而不使用 launch，需要自行设置 GAZEBO_MODEL_PATH。
+
+## 实车运行
+
+V550_mec + N10P 的传输、编译、硬件启动和 EGO 操作见 [REAL_ROBOT.md](REAL_ROBOT.md)。

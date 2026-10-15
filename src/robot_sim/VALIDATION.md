@@ -81,3 +81,15 @@ RViz 的 `/goal_pose` 接口由自动测试直接发布 map 坐标消息验证�
 修复版收到 246 次调试心跳，测试结束前心跳持续更新。
 ego_planner 单包构建成功，git diff --check 通过。
 复杂绕障按用户要求仅分析，参数和策略保持不变，报告见 diagnostics/bag3/README.md。
+
+## 2026-10-15 实车入口的本机合成数据验证
+
+- `--symlink-install --packages-up-to robot_sim` 构建 15 个包成功；退出停车修改后，ego_planner 和 robot_sim 重新编译成功。
+- 两个实车 launch 的 `--show-args` 解析通过，Python/XML 语法和 `git diff --check` 通过。
+- 独立 ROS 域 88，仅启动 ego_real（关闭 SLAM，关闭 RViz，默认预览模式）。
+- 测试注入合成地图、里程计、雷达和非零 map/odom_combined 静态平移；未打开串口或启动硬件。
+- map 中 x=-0.5 的目标正确转换为 odom_combined 中 x=-1.5（map->odom_combined 的原点平移为 +1 m）。
+- 收到 11 条 B 样条；点云、参考指令 frame 均为 odom_combined，规划器 use_sim_time=false。
+- 预览速度出现非零值，合速度最大 0.15 m/s；/cmd_vel 收到消息数量为零。
+- 停止注入里程计后，预览线速度和角速度归零；Ctrl+C 后 ground_traj_server 正常退出。
+- 本电脑缺少 robot_localization，未启动实际 EKF/N10P/底盘；上述结果不代表实车闭环行驶验收。
