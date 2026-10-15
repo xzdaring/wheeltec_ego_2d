@@ -1,0 +1,1 @@
+/ros_workspace/wheeltec_ego_2d/build/slam_toolbox/rosidl_generator_rs/slam_toolbox/rust/src/lib.rs

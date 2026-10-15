@@ -1,0 +1,1 @@
+/ros_workspace/wheeltec_ego_2d/src/slam_toolbox/include/slam_toolbox/snap_utils.hpp

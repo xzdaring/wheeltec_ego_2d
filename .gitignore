@@ -2,4 +2,18 @@ build/
 install/
 log/
 .vscode/
+diagnostics/
+.build_backup/
 
+*.db3
+*.mcap
+rosbag2_*/
+bag*/
+
+*.bag
+
+__pycache__/
+*.pyc
+
+.vscode/
+```
