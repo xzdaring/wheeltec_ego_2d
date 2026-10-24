@@ -32,18 +32,12 @@ def generate_launch_description():
         DeclareLaunchArgument('max_vel', default_value='0.12'),
         DeclareLaunchArgument('max_speed', default_value='0.15'),
         DeclareLaunchArgument('max_yaw_rate', default_value='0.25'),
-        DeclareLaunchArgument('max_tracking_error', default_value='0.20'),
-        # 同时传给 FSM 与 manager，不能在 include 中硬编码覆盖用户设置。
-        DeclareLaunchArgument('planning_horizon', default_value='5.0'),
-        DeclareLaunchArgument('map_resolution', default_value='0.1'),
-        DeclareLaunchArgument('control_points_distance', default_value='0.10'),
-        DeclareLaunchArgument('obstacles_inflation', default_value='0.01'),
+        DeclareLaunchArgument('·', default_value='0.20'),
 
         DeclareLaunchArgument('follow_trajectory_yaw', default_value='true', # 默认车头沿轨迹走。
                               choices=['true', 'false']), # 可关闭行驶转向，保留最终对齐。
         DeclareLaunchArgument('yaw_lookahead', default_value='0.3'), # 切线预瞄时间，单位秒。
         DeclareLaunchArgument('start_slam', default_value='true'),
-        DeclareLaunchArgument('obstacle_source', default_value='scan', choices=['scan', 'map']),
         DeclareLaunchArgument('safety_radius', default_value='0.25',
                               description='车体平面外接圆半径加余量，按实物测量调整'),
         Node(package='slam_toolbox', executable='async_slam_toolbox_node', name='slam_toolbox',
@@ -59,15 +53,11 @@ def generate_launch_description():
                               'odometry_topic': odom, 'cloud_topic': '/ego/cloud',
                               'flight_type': '1', 'drone_id': '0', 'max_vel': LaunchConfiguration('max_vel'),
                               'max_tracking_error': LaunchConfiguration('max_tracking_error'),
-                              'max_acc': '0.2', 'planning_horizon': LaunchConfiguration('planning_horizon'),
-                              'map_resolution': LaunchConfiguration('map_resolution'),
-                              'control_points_distance': LaunchConfiguration('control_points_distance'),
-                              'obstacles_inflation': LaunchConfiguration('obstacles_inflation'),
+                              'max_acc': '0.2', 'planning_horizon': '5.0',
                               'use_distinctive_trajs': 'False', 'obj_num_set': '0'}.items()),
         Node(package='ego_planner', executable='ground_traj_server', name='ground_traj_server',
              parameters=[{'use_sim_time': False, 'planning_frame': frame, 'base_frame': base,
                           'max_speed': ParameterValue(LaunchConfiguration('max_speed'), value_type=float),
-                          'grid_resolution': ParameterValue(LaunchConfiguration('map_resolution'), value_type=float),
                           'max_yaw_rate': ParameterValue(LaunchConfiguration('max_yaw_rate'), value_type=float), # 实车保持原有低速上限。
                           'follow_trajectory_yaw': ParameterValue( # 显式转换布尔 launch 参数。
                               LaunchConfiguration('follow_trajectory_yaw'), value_type=bool), # 允许切换。
@@ -76,8 +66,7 @@ def generate_launch_description():
                           'safety_radius': ParameterValue(LaunchConfiguration('safety_radius'), value_type=float)}],
              remappings=remaps + [('/cmd_vel', output)], output='screen'),
         Node(package='robot_sim', executable='ego_navigation_bridge.py',
-             parameters=[{'use_sim_time': False, 'planning_frame': frame,
-                          'obstacle_source': LaunchConfiguration('obstacle_source')}],
+             parameters=[{'use_sim_time': False, 'planning_frame': frame}],
              remappings=remaps, output='screen'),
         Node(package='robot_sim', executable='navigation_visualizer.py',
              parameters=[{'use_sim_time': False, 'planning_frame': frame}],
