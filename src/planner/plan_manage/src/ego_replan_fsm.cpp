@@ -28,6 +28,8 @@ namespace ego_planner
     node_->declare_parameter("fsm/planning_horizen_time", -1.0);   // 沿全局轨迹向前搜索的最大时间视野，秒。
     node_->declare_parameter("fsm/emergency_time", 1.0);           // 预计碰撞剩余时间小于该值时急停，秒。
     node_->declare_parameter("fsm/realworld_experiment", false);   // true 时必须等待外部 /traj_start_trigger。
+    // 实车参考偏离反馈过大时从实测状态重规划；0 保留原有行为。
+    node_->declare_parameter("fsm/max_tracking_error", 0.0);
     node_->declare_parameter("fsm/fail_safe", true);               // 急停后速度足够小时是否自动恢复规划。
 
     node_->get_parameter("fsm/flight_type", target_type_);
@@ -623,6 +625,14 @@ namespace ego_planner
       t_cur = std::min(info->duration_, t_cur);
 
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
+      const double tracking_limit = node_->get_parameter("fsm/max_tracking_error").as_double();
+      if (tracking_limit > 0.0 && (pos - odom_pos_).head<2>().norm() > tracking_limit)
+      {
+        // 转向减速或近障停车时，禁止参考轨迹继续脱离真实小车向前滚动。
+        changeFSMExecState(REPLAN_TRAJ, "TRACKING_ERROR");
+        break;
+      }
+
 
       /* && (end_pt_ - pos).norm() < 0.5 */
       if ((target_type_ == TARGET_TYPE::PRESET_TARGET) &&
@@ -736,6 +746,13 @@ namespace ego_planner
     start_pt_ = info->position_traj_.evaluateDeBoorT(t_cur);
     start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_cur);
     start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
+    const double tracking_limit = node_->get_parameter("fsm/max_tracking_error").as_double();
+    if (tracking_limit > 0.0 && (start_pt_ - odom_pos_).head<2>().norm() > tracking_limit)
+    {
+      // 大误差时旧参考不再是可信边界，用实测位置和速度生成新的可行 B 样条。
+      return planFromGlobalTraj(trial_times);
+    }
+
 
     // 尝试顺序：继承旧轨迹 -> 普通多项式 -> 随机扰动多项式。
     bool success = callReboundReplan(false, false);
@@ -1041,7 +1058,8 @@ namespace ego_planner
         break;
       }
     }
-    if (t > planner_manager_->global_data_.global_duration_) // Last global point
+    // 包含恰好到达终点的情况；否则局部目标会残留为旧值，近距离目标可能反复规划失败。
+    if (t >= planner_manager_->global_data_.global_duration_) // Last global point
     {
       local_target_pt_ = end_pt_;
       planner_manager_->global_data_.last_progress_time_ = planner_manager_->global_data_.global_duration_;
@@ -1055,7 +1073,16 @@ namespace ego_planner
     }
     else
     {
-      local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
+      // 全局多项式为几何参考，其首尾时间被额外放慢，不能当作局部巡航速度。
+      // 保留全局切线方向，以规划限速和剩余制动距离确定局部末端速度。
+      Eigen::Vector3d direction = planner_manager_->global_data_.getVelocity(t);
+      direction.z() = 0.0;
+      if (direction.norm() < 1e-6) direction = local_target_pt_ - start_pt_;
+      const double remaining = (end_pt_ - local_target_pt_).head<2>().norm();
+      const double cruise = std::min(planner_manager_->pp_.max_vel_,
+        std::sqrt(2.0 * planner_manager_->pp_.max_acc_ * remaining));
+      local_target_vel_.setZero();
+      if (direction.norm() > 1e-6) local_target_vel_ = direction.normalized() * cruise;
     }
   }
 

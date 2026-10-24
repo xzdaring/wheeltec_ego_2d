@@ -9,12 +9,23 @@ Visualization Manager: # 配置导航坐标和可视化订阅。
       Name: Grid # 界面名称。
       Enabled: true # 默认启用。
     - Class: rviz_default_plugins/Map # 显示动态生成的地图。
-      Name: Online Map # 区分预存地图。
+      Name: SLAM History Map # 累计地图，非实时避障输入。
       Enabled: true # 默认启用。
       Topic: # 地图使用持久化可靠订阅。
         Value: /map # slam_toolbox 输出。
         Durability Policy: Transient Local # 后启动也可收到地图。
         Reliability Policy: Reliable # 与 SLAM 发布者匹配。
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Live Planning Obstacles
+      Enabled: true
+      Topic:
+        Value: /ego/cloud
+        Reliability Policy: Reliable
+      Style: Points
+      Size (m): 0.04
+      Color Transformer: FlatColor
+      Color: 255; 80; 30
+      Decay Time: 0
     - Class: rviz_default_plugins/RobotModel # 显示真实车型描述。
       Name: V550 # 模型显示名称。
       Enabled: true # 默认启用。
@@ -35,8 +46,8 @@ Visualization Manager: # 配置导航坐标和可视化订阅。
       Topic: # 汇总全部轨迹细节。
         Value: /ego/visualization # 独立可视化节点输出。
     - Class: rviz_default_plugins/PointCloud2 # 显示 EGO 真正使用的膨胀占据体素。
-      Name: Inflated Obstacles # 与原始 SLAM 障碍区分。
-      Enabled: true # 默认显示安全包络。
+      Name: Inflated Obstacles (raw cloud) # 原始点云用于调试；默认由 Marker 按真实格宽显示。
+      Enabled: false # 默认显示安全包络。
       Topic: # 不是绘制近似圆，而是读取实际膨胀地图。
         Value: /drone_0_grid/grid_map/occupancy_inflate # EGO 地图输出。
         Reliability Policy: Reliable # 与规划器发布者匹配。

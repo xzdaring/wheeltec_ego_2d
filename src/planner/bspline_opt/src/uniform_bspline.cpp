@@ -234,55 +234,40 @@ namespace ego_planner
     if (start_end_derivative.size() != 4)
     {
       cout << "[B-spline]:derivatives error." << endl;
+      return;
     }
 
     int K = point_set.size();
 
-    // write A
-    Eigen::Vector3d prow(3), vrow(3), arow(3);
-    prow << 1, 4, 1;
-    vrow << -1, 0, 1;
-    arow << 1, -2, 1;
-
-    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(K + 4, K + 2);
-
-    for (int i = 0; i < K; ++i)
-      A.block(i, i, 1, 3) = (1 / 6.0) * prow.transpose();
-
-    A.block(K, 0, 1, 3) = (1 / 2.0 / ts) * vrow.transpose();
-    A.block(K + 1, K - 1, 1, 3) = (1 / 2.0 / ts) * vrow.transpose();
-
-    A.block(K + 2, 0, 1, 3) = (1 / ts / ts) * arow.transpose();
-    A.block(K + 3, K - 1, 1, 3) = (1 / ts / ts) * arow.transpose();
-
-    //cout << "A" << endl << A << endl << endl;
-
-    // write b
-    Eigen::VectorXd bx(K + 4), by(K + 4), bz(K + 4);
-    for (int i = 0; i < K; ++i)
-    {
-      bx(i) = point_set[i](0);
-      by(i) = point_set[i](1);
-      bz(i) = point_set[i](2);
-    }
-
-    for (int i = 0; i < 4; ++i)
-    {
-      bx(K + i) = start_end_derivative[i](0);
-      by(K + i) = start_end_derivative[i](1);
-      bz(K + i) = start_end_derivative[i](2);
-    }
-
-    // solve Ax = b
-    Eigen::VectorXd px = A.colPivHouseholderQr().solve(bx);
-    Eigen::VectorXd py = A.colPivHouseholderQr().solve(by);
-    Eigen::VectorXd pz = A.colPivHouseholderQr().solve(bz);
-
-    // convert to control pts
+    // 三次均匀样条的端点位置、速度、加速度由端部三个控制点唯一决定。
+    // 原来的混合最小二乘会牺牲这些边界，尤其 dt 很大时导数行权重极小。
+    // 固定两端控制点，只拟合内部位置，避免重规划切换时凭空改变速度方向。
     ctrl_pts.resize(3, K + 2);
-    ctrl_pts.row(0) = px.transpose();
-    ctrl_pts.row(1) = py.transpose();
-    ctrl_pts.row(2) = pz.transpose();
+    const auto set_boundary = [&](int i, const Eigen::Vector3d &p,
+                                  const Eigen::Vector3d &v, const Eigen::Vector3d &a) {
+      ctrl_pts.col(i) = p - ts * v + ts * ts * a / 3.0;
+      ctrl_pts.col(i + 1) = p - ts * ts * a / 6.0;
+      ctrl_pts.col(i + 2) = p + ts * v + ts * ts * a / 3.0;
+    };
+    set_boundary(0, point_set.front(), start_end_derivative[0], start_end_derivative[2]);
+    set_boundary(K - 1, point_set.back(), start_end_derivative[1], start_end_derivative[3]);
+    const int free_count = K - 4;
+    if (free_count > 0)
+    {
+      Eigen::MatrixXd A = Eigen::MatrixXd::Zero(K, K + 2);
+      Eigen::MatrixXd samples(K, 3);
+      for (int i = 0; i < K; ++i)
+      {
+        A(i, i) = 1.0 / 6.0;
+        A(i, i + 1) = 4.0 / 6.0;
+        A(i, i + 2) = 1.0 / 6.0;
+        samples.row(i) = point_set[i].transpose();
+      }
+      samples -= A.leftCols(3) * ctrl_pts.leftCols(3).transpose();
+      samples -= A.rightCols(3) * ctrl_pts.rightCols(3).transpose();
+      ctrl_pts.middleCols(3, free_count) =
+        A.middleCols(3, free_count).colPivHouseholderQr().solve(samples).transpose();
+    }
 
     // cout << "[B-spline]: parameterization ok." << endl;
   }

@@ -825,8 +825,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
     return;
   }
 
-  if (latest_cloud.points.size() == 0)
-    return;
+  // 空点云也是有效的新观测，必须执行下方清图，否则旧障碍永远残留。
 
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
@@ -837,7 +836,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   pcl::PointXYZ pt;
   Eigen::Vector3d p3d, p3d_inf;
 
-  int inf_step = ceil(mp_.obstacles_inflation_ / mp_.resolution_);
+  int inf_step = ceil(mp_.obstacles_inflation_ / mp_.resolution_) + 1;
   int inf_step_z = 1;
 
   double max_x, max_y, max_z, min_x, min_y, min_z;
@@ -863,16 +862,21 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
         fabs(devi(2)) < mp_.local_update_range_(2))
     {
 
-      /* inflate the point */
-      // 点云膨胀
+      // 在 XY 平面按米制圆形半径膨胀，标记与该圆相交的栅格。
+      // 不再把 1 cm 向上取整成 10 cm 的方形半径；栅格本身仍有离散误差。
+      Eigen::Vector3i source_index;
+      posToIndex(p3d, source_index);
       for (int x = -inf_step; x <= inf_step; ++x)
         for (int y = -inf_step; y <= inf_step; ++y)
           for (int z = -inf_step_z; z <= inf_step_z; ++z)
           {
-
-            p3d_inf(0) = pt.x + x * mp_.resolution_;
-            p3d_inf(1) = pt.y + y * mp_.resolution_;
-            p3d_inf(2) = pt.z + z * mp_.resolution_;
+            inf_pt = source_index + Eigen::Vector3i(x, y, z);
+            if (!isInMap(inf_pt)) continue;
+            indexToPos(inf_pt, p3d_inf);
+            const double dx = std::max(0.0, std::abs(p3d_inf.x() - pt.x) - mp_.resolution_ * 0.5);
+            const double dy = std::max(0.0, std::abs(p3d_inf.y() - pt.y) - mp_.resolution_ * 0.5);
+            if (dx * dx + dy * dy > mp_.obstacles_inflation_ * mp_.obstacles_inflation_ + 1e-12)
+              continue;
 
             max_x = max(max_x, p3d_inf(0));
             max_y = max(max_y, p3d_inf(1));

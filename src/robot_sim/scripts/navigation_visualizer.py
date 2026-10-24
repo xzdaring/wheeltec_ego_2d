@@ -8,6 +8,8 @@ from geometry_msgs.msg import Point, PoseStamped  # 标记点和最终目标。
 from nav_msgs.msg import Odometry, Path  # 保存真实行驶路径。
 from quadrotor_msgs.msg import PositionCommand  # 显示当前参考位置。
 from traj_utils.msg import Bspline  # 使用规划器真正输出的曲线。
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py.point_cloud2 import read_points
 from visualization_msgs.msg import Marker, MarkerArray  # 汇总可视化图层。
 
 
@@ -28,6 +30,8 @@ class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或�
     def __init__(self):  # 订阅全部显示所需信息。
         super().__init__('navigation_visualizer')  # 便于单独诊断。
         self.planning_frame = self.declare_parameter('planning_frame', 'odom').value
+        self.grid_resolution = 0.1
+        self.inflated_cells = []
         self.items = {}  # 每个命名空间保存最新标记，定期重发兼容晚开的 RViz。
         self.path = Path()  # 实际执行路径与期望轨迹分开显示。
         self.path.header.frame_id = self.planning_frame  # 跟随真实里程计坐标。
@@ -47,6 +51,7 @@ class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或�
             PoseStamped, '/move_base_simple/goal', self.on_goal, 10)
         self.create_subscription(  # 当前采样参考与整条曲线分开显示。
             PositionCommand, '/ego/position_cmd', self.on_reference, 10)
+        self.create_subscription(PointCloud2, '/drone_0_grid/grid_map/occupancy_inflate', self.on_inflated, 1)
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_timer(0.5, self.publish)  # 低频重发显示，不拖慢控制节点。
 
@@ -119,6 +124,22 @@ class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或�
             arrow.scale.y, arrow.scale.z = 0.05, 0.08  # 箭头头部尺寸。
             self.items[f'arrow{i}'] = arrow  # 黄色箭头显示行进方向与速度大小。
 
+    def on_inflated(self, msg):
+        # PointCloud2 不携带体素边长，RViz 固定 Size 会在修改分辨率后显示错误。
+        # 用实际栅格中心和参数化尺寸显示同一份占据层，不额外画近似安全圆。
+        if msg.header.frame_id != self.planning_frame:
+            return
+        self.inflated_cells = list(read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True))
+
+    def update_inflated_marker(self):
+        marker = self.marker('inflated_cells', Marker.CUBE_LIST, (0.7, 0.3, 1.0), self.grid_resolution)
+        marker.scale.z = 0.01
+        marker.color.a = 0.25
+        cells = {(float(p[0]), float(p[1])) for p in self.inflated_cells
+                 if abs(float(p[2])) <= self.grid_resolution * 0.51}
+        marker.points = [Point(x=x, y=y, z=0.0) for x, y in cells]
+        self.items['inflated_cells'] = marker
+
     def on_odom(self, msg):  # 记录实际走过的路径。
         self.pose = msg.pose.pose.position  # 文字跟随车体移动。
         if self.path.poses:  # 仅在移动足够距离后新增点。
@@ -138,16 +159,17 @@ class NavigationVisualizer(Node):  # 独立可视化节点，不发布速度或�
             try:  # 规划器重启时允许再次查询。
                 values = [p.double_value for p in self.future.result().values]
                 radius, resolution, horizon, speed = values  # 与请求顺序一致。
-                cells = math.ceil(radius / resolution)  # 当前地图代码的离散膨胀步数。
+                self.grid_resolution = resolution
                 self.parameters = (  # 显示配置值与栅格离散尺度。
                     f'膨胀半径 {radius:.2f} m | 分辨率 {resolution:.2f} m\n'
-                    f'XY 各扩 {cells} 格（方形膨胀）\n'
+                    f'点云圆形膨胀；格边长 {resolution:.2f} m（含离散余量）\n'
                     f'规划视野 {horizon:.2f} m | 规划限速 {speed:.2f} m/s')
             except (AttributeError, ZeroDivisionError, RuntimeError):
                 self.parameters = '规划器参数暂不可用'  # 不显示过期的伪造配置。
             self.future = None  # 下个周期重新读取，参数变化能反映到界面。
 
     def publish(self):  # 重发所有图层和信息文字。
+        self.update_inflated_marker()
         self.read_parameters()  # 从运行节点读取膨胀参数。
         text = self.marker('information', Marker.TEXT_VIEW_FACING, (1.0, 1.0, 1.0), 0.16)
         text.pose.position = Point(x=self.pose.x, y=self.pose.y + 0.7, z=0.6)

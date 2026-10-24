@@ -38,6 +38,7 @@ public:
     follow_yaw_ = declare_parameter("follow_trajectory_yaw", true); // 默认沿轨迹转动车头。
     yaw_lookahead_ = declare_parameter("yaw_lookahead", 0.3); // 提前看 0.3 s，减轻弯道滞后。
     radius_ = declare_parameter("safety_radius", 0.22);
+    grid_resolution_ = declare_parameter("grid_resolution", 0.1); // 与规划器共用分辨率。
     // 所有订阅器保存在成员中，避免构造结束后被释放。
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom", 10, [this](nav_msgs::msg::Odometry::ConstSharedPtr m) {
@@ -317,10 +318,14 @@ private:
     followHeading(t, ended && final_segment, vx, vy, cmd); // 跟随切线并按角差减速。
     cmd.linear.x = std::cos(a) * vx + std::sin(a) * vy;
     cmd.linear.y = -std::sin(a) * vx + std::cos(a) * vy;
-    if (blocked(cmd.linear.x, cmd.linear.y, cmd.angular.z) || // 雷达检查弧线扫掠。
-        blockedByMap(vx, vy, cmd.angular.z)) // 膨胀地图检查使用规划坐标速度。
+    const bool scan_blocked = blocked(cmd.linear.x, cmd.linear.y, cmd.angular.z);
+    const bool map_blocked = blockedByMap(vx, vy, cmd.angular.z);
+    if (scan_blocked || map_blocked)
     {
-      cmd = geometry_msgs::msg::Twist(); // 任一检查预测碰撞就停止。
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+        "导航停车: scan=%s inflated_map=%s goal_distance=%.3f m",
+        scan_blocked ? "blocked" : "clear", map_blocked ? "blocked" : "clear", distance);
+      cmd = geometry_msgs::msg::Twist(); // 保留原有碰撞检查，不为提速绕过停车。
     }
     reference_yaw_rate_ = cmd.angular.z; // 近障停车后，调试角速度也应归零。
     publishReference(target, feed); // 同时发布位置、速度和车头参考，便于检查。

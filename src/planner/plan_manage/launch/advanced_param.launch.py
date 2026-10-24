@@ -152,6 +152,7 @@ def generate_launch_description():
             {'fsm/planning_horizen_time': 3.0},    # 沿全局轨迹向前看的时间视野，s。
             {'fsm/emergency_time': 1.0},           # 预计 1 s 内碰撞则进入急停。
             {'fsm/realworld_experiment': False},   # False 时无需外部遥控触发。
+            {'fsm/max_tracking_error': LaunchConfiguration('max_tracking_error', default='0.0')},
             {'fsm/fail_safe': True},               # 急停稳定后允许自动恢复规划。
             {'use_sim_time': ParameterValue(use_sim_time, value_type=bool)},
             
@@ -174,14 +175,14 @@ def generate_launch_description():
             {'fsm/waypoint4_z': point4_z},
             
             # ---------------- GridMap：局部三维占据地图 ----------------
-            {'grid_map/resolution': 0.1},          # 体素边长；越小越精细、耗时和内存越大。
+            {'grid_map/resolution': ParameterValue(LaunchConfiguration('map_resolution', default='0.1'), value_type=float)},          # 体素边长；越小越精细、耗时和内存越大。
             {'grid_map/map_size_x': map_size_x},
             {'grid_map/map_size_y': map_size_y},
             {'grid_map/map_size_z': 2.0},
             {'grid_map/local_update_range_x': 5.5}, # 每次围绕相机更新的局部半范围，m。
             {'grid_map/local_update_range_y': 5.5},
             {'grid_map/local_update_range_z': 4.5},
-            {'grid_map/obstacles_inflation': 0.20}, # 障碍膨胀半径，约 9.9 cm。
+            {'grid_map/obstacles_inflation': ParameterValue(LaunchConfiguration('obstacles_inflation', default='0.20'), value_type=float)}, # 点云圆形膨胀半径，米。
             {'grid_map/local_map_margin': 10},       # 局部更新边界额外保留的体素层数。
             {'grid_map/ground_height': -0.5},       # 世界坐标地面高度，m。
             # 相机参数：必须与深度图实际标定一致。
@@ -216,7 +217,7 @@ def generate_launch_description():
             {'manager/max_vel': max_vel},              # 各轴最大速度，m/s。
             {'manager/max_acc': max_acc},              # 各轴最大加速度，m/s²。
             {'manager/max_jerk': 4.0},                 # jerk 配置，m/s³。
-            {'manager/control_points_distance': 0.4},  # 相邻控制点期望间距，m。
+            {'manager/control_points_distance': ParameterValue(LaunchConfiguration('control_points_distance', default='0.4'), value_type=float)},  # 相邻控制点期望间距，m。
             {'manager/feasibility_tolerance': 0.05},   # 可行性检查允许约 5% 余量。
             {'manager/planning_horizon': planning_horizon},
             {'manager/use_distinctive_trajs': use_distinctive_trajs},

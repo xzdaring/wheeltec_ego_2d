@@ -31,7 +31,7 @@
 #include "lslidar_driver/lslidar_driver.h"
 #include <functional>
 
-int truncated_mode_=1;          //多角度屏蔽开关：默认为0，如果需要屏蔽多个角度，则truncated_mode_赋值为1。
+int truncated_mode_=0;          // 多角度屏蔽由同名 ROS 参数控制；默认保留完整扫描。
 
 int scan_crop_min[]={70,120,260}; 	//雷达屏蔽角度，这里屏蔽角度为135°到225°，
                                 //如果要多角度屏蔽，如10~30，50~60，改为：
@@ -82,6 +82,11 @@ namespace lslidar_driver
 		angle_disable_max = 0.0;
 
 		this->declare_parameter<std::string>("lidar_name", "M10");
+		// 读取厂家 YAML 已有的开关，避免硬编码屏蔽左右两侧而参数修改不生效。
+		this->declare_parameter<int>("truncated_mode_", 0);
+		this->get_parameter("truncated_mode_", truncated_mode_);
+		RCLCPP_INFO(this->get_logger(), "Multi-angle cropping: %s",
+			truncated_mode_ ? "enabled" : "disabled");
 		this->declare_parameter<std::string>("frame_id", "laser_link");
 		this->declare_parameter<std::string>("scan_topic", "/scan");
 		this->declare_parameter<std::string>("pointcloud_topic", "/lslidar_point_cloud");

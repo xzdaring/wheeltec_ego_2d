@@ -318,6 +318,10 @@ namespace ego_planner
           point_set.push_back(local_target_pt);
         } while (point_set.size() < 7); // If the start point is very close to end point, this will help
 
+        // 等弧长采样加密后，时间步长也必须随真实点距缩短。
+        // 否则 1.5 m 路径被补成 7 个点后仍每点 5 s，重规划越多越慢。
+        ts = cps_dist / pp_.max_vel_;
+
         // 滚动重规划的起端导数取旧轨迹当前时刻，保证切换时速度、加速度连续；
         // 新局部目标使用调用者给定速度，末端加速度设为零。
         start_end_derivatives.push_back(local_data_.velocity_traj_.evaluateDeBoorT(t_cur));
@@ -469,6 +473,28 @@ namespace ego_planner
 
     // t_refine = ros::Time::now() - t_start;
     t_refine = clock_->now() - t_start; // 使用节点时钟保持轨迹与仿真时间一致。
+
+    // 检查每个有效样条段的 Bezier 凸包，而非含外推端点的原始控制点凸包。
+    // 非零末端速度会使原始末端控制点伸出视野，但实际曲线仍可完全在范围内。
+    const Eigen::MatrixXd checked_points = pos.getControlPoint();
+    const double geometry_limit = pp_.planning_horizen_ + pp_.ctrl_pt_dist;
+    bool geometry_ok = checked_points.allFinite() && std::isfinite(pos.getTimeSum());
+    for (int i = 0; i + 3 < checked_points.cols() && geometry_ok; ++i)
+    {
+      const Eigen::Vector3d a = checked_points.col(i), b = checked_points.col(i + 1);
+      const Eigen::Vector3d c = checked_points.col(i + 2), d = checked_points.col(i + 3);
+      const Eigen::Vector3d hull[] = {(a + 4 * b + c) / 6, (2 * b + c) / 3,
+                                     (b + 2 * c) / 3, (b + 4 * c + d) / 6};
+      for (const auto &point : hull)
+        geometry_ok = geometry_ok && (point - start_pt).head<2>().norm() <= geometry_limit;
+    }
+    if (!geometry_ok)
+    {
+      RCLCPP_WARN_THROTTLE(rclcpp::get_logger("ego_planner"), *clock_, 2000,
+        "Reject trajectory outside local horizon (limit %.3f m); retry initialization.", geometry_limit);
+      continous_failures_count_++;
+      return false;
+    }
 
     // save planned results
     // 只有初始化、优化以及必要精修全部成功，才替换当前执行轨迹。

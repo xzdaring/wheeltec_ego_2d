@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
+import time
+from collections import deque
 import math  # 三角函数用于传感器坐标转换和全向速度旋转。
 import numpy as np  # 批量提取在线地图障碍，避免逐格 Python 循环。
 import rclpy  # ROS 2 Python 客户端负责消息和仿真时钟。
 from rclpy.node import Node  # 节点对象保存订阅器、发布器和定时器。
 from rclpy.time import Time  # 零时刻 TF 查询表示最新变换。
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.qos import QoSProfile  # 地图订阅深度。
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy  # 地图持久化 QoS。
 from tf2_ros import Buffer, TransformListener, TransformException  # 真实变换坐标，不能只改 frame_id。
 from geometry_msgs.msg import PoseStamped  # RViz 目标接口。
 from nav_msgs.msg import OccupancyGrid, Odometry  # 在线 SLAM 地图与底盘反馈。
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32  # 将二维障碍平铺到 EGO 的 z=0 平面。
-from sensor_msgs.msg import PointCloud2  # EGO 的独立点云输入消息。
+from sensor_msgs.msg import LaserScan, PointCloud2  # EGO 的独立点云输入消息。
 from std_msgs.msg import Header  # 给点云标明坐标系与采样时刻。
 
 
@@ -24,6 +27,13 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
     def __init__(self):  # 构造时创建接口，所有状态由回调更新。
         super().__init__('ego_navigation_bridge')  # 与 launch 中的节点名称保持一致。
         self.planning_frame = self.declare_parameter('planning_frame', 'odom').value
+        # 仿真保留原地图入口；实车 launch 显式选择 scan，与参考工程一致。
+        self.obstacle_source = self.declare_parameter('obstacle_source', 'map').value
+        if self.obstacle_source not in ('map', 'scan'):
+            raise ValueError('obstacle_source 必须是 map 或 scan')
+        self.pending_scans = deque(maxlen=10)
+        self.scan_cloud_time = -100.0
+        self.odom_time = -100.0
         self.buffer = Buffer()  # 保存 map、odom、laser 和 base_link 的变换历史。
         self.listener = TransformListener(self.buffer, self)  # 保留监听器，防止离开作用域后停止接收 TF。
         self.map = self.odom = None  # 地图和里程计未就绪时不生成点云。
@@ -41,6 +51,10 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)  # 获取位置和车体朝向用于反馈。
         self.create_subscription(  # RViz2 的标准 Goal Pose 工具输出。
             PoseStamped, '/goal_pose', self.on_goal, 10)  # 保留接口回调。
+        if self.obstacle_source == 'scan':
+            self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
+            self.create_timer(0.02, self.drain_scans)
+        self.get_logger().info(f'规划障碍来源: {self.obstacle_source}')
         self.create_timer(0.2, self.publish_cloud)  # 5 Hz 更新局部障碍并重试待处理目标。
 
     def seconds(self):  # 全部超时都跟随 Gazebo 仿真时间。
@@ -55,6 +69,7 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
             self.get_logger().error('里程计 frame 与 planning_frame 不一致，拒绝输入。')
             self.odom = None
             return
+        self.odom_time = self.seconds()
         self.odom = msg  # 保留 yaw 和 x/y 的原始反馈。
 
 
@@ -62,7 +77,59 @@ class NavigationBridge(Node):  # 仅管理地图与目标转换，速度控制�
         self.pending_goal = msg  # 等地图、TF 和里程计就绪后再下发。
         self.get_logger().info('收到目标，等待在线地图及 TF 后交给 EGO。')  # 明确等待原因。
 
+    def on_scan(self, scan):
+        # 等待原采样时间的 TF，不阻塞订阅线程，也不使用最新 TF 替代。
+        if scan.header.frame_id:
+            self.pending_scans.append((scan, time.monotonic()))
+
+    def drain_scans(self):
+        while self.pending_scans:
+            scan, received = self.pending_scans[0]
+            age = self.seconds() - Time.from_msg(scan.header.stamp).nanoseconds * 1e-9
+            if time.monotonic() - received > 0.5 or age > 0.5 or age < -0.1:
+                self.pending_scans.popleft()
+                continue
+            if self.odom is None or self.seconds() - self.odom_time > 0.5:
+                return
+            try:
+                tr = self.buffer.lookup_transform(
+                    self.planning_frame, scan.header.frame_id, Time.from_msg(scan.header.stamp))
+            except TransformException:
+                return
+            self.pending_scans.popleft()
+            ranges = np.asarray(scan.ranges, dtype=float)
+            valid = np.isfinite(ranges) & (ranges >= scan.range_min) & (ranges <= scan.range_max)
+            # 全 NaN/非法扫描不代表空旷，不能清图或刷新感知看门狗。
+            if not np.any(valid | np.isposinf(ranges)):
+                continue
+            angles = scan.angle_min + np.flatnonzero(valid) * scan.angle_increment
+            points = np.column_stack((ranges[valid] * np.cos(angles),
+                                      ranges[valid] * np.sin(angles), np.zeros(np.count_nonzero(valid))))
+            q = tr.transform.rotation
+            vector = np.array([q.x, q.y, q.z])
+            norm = math.sqrt(float(vector @ vector) + q.w * q.w)
+            if norm < 1e-12:
+                continue
+            vector, w = vector / norm, q.w / norm
+            cross = 2.0 * np.cross(vector, points)
+            points += w * cross + np.cross(vector, cross)
+            points += np.array([tr.transform.translation.x, tr.transform.translation.y,
+                                tr.transform.translation.z])
+            p = self.odom.pose.pose.position
+            points = points[(np.abs(points[:, 0] - p.x) < 5.0) &
+                            (np.abs(points[:, 1] - p.y) < 5.0)]
+            points[:, 2] = 0.0  # 保留现有二维 EGO 的规划平面。
+            header = Header(frame_id=self.planning_frame, stamp=scan.header.stamp)
+            # 每帧替换规划障碍；合法的空点云同样发布，以清掉上一帧障碍。
+            self.cloud.publish(create_cloud_xyz32(header, points.tolist()))
+            self.scan_cloud_time = self.seconds()
+
     def publish_cloud(self):  # 将累计 SLAM 地图转为 EGO 可读的平面障碍。
+        if self.obstacle_source == 'scan':
+            # 点云只在收到新扫描后发布；SLAM 地图重发不能冒充实时感知。
+            if self.pending_goal is not None and self.seconds() - self.scan_cloud_time < 0.5:
+                self.send_goal()
+            return
         if self.seconds() - self.map_time >= 3.0:  # 旧地图停止输出，C++ 点云看门狗会停车。
             return  # 不用旧点云伪装感知正常。
         if self.map is None or self.odom is None:  # 未知环境从第一帧雷达地图开始。
