@@ -1073,16 +1073,7 @@ namespace ego_planner
     }
     else
     {
-      // 全局多项式为几何参考，其首尾时间被额外放慢，不能当作局部巡航速度。
-      // 保留全局切线方向，以规划限速和剩余制动距离确定局部末端速度。
-      Eigen::Vector3d direction = planner_manager_->global_data_.getVelocity(t);
-      direction.z() = 0.0;
-      if (direction.norm() < 1e-6) direction = local_target_pt_ - start_pt_;
-      const double remaining = (end_pt_ - local_target_pt_).head<2>().norm();
-      const double cruise = std::min(planner_manager_->pp_.max_vel_,
-        std::sqrt(2.0 * planner_manager_->pp_.max_acc_ * remaining));
-      local_target_vel_.setZero();
-      if (direction.norm() > 1e-6) local_target_vel_ = direction.normalized() * cruise;
+      local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
     }
   }
 

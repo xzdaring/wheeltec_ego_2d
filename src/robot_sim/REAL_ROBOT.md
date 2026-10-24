@@ -277,3 +277,17 @@ ros2 param get /ground_traj_server grid_resolution
 
 合成模型中 4 m 转向远目标和 2 m 单障碍绕行通过，详情在 `diagnostics/bag14/REPORT.md`。
 本轮未做物理实车闭环验证，不能承诺实际速度恒等于规划上限。
+
+
+## bag14 速度与连续性改动已按用户要求撤回
+
+已恢复 bag14 修改前的 B 样条最小二乘参数化、局部目标速度取全局轨迹速度、原有重采样时间逻辑及原始控制点凸包范围检查。控制点间距恢复 0.4 m。此前 0.10 m 和硬边界约束版本的测试结果仅供历史参考，不代表当前版本。地图膨胀和相关可视化修改保留。
+
+
+## 2026-10-24 bag15 碰撞栅格一致性修复
+
+- `ground_traj_server` 去掉栅格外额外 1 cm，使用与规划器相同的 `floor((p-origin)*(1/resolution))` 栅格索引，只检查 z=0 所属层。
+- 实车/仿真 launch 共用 `map_resolution` 和地图尺寸派生的原点；雷达 `safety_radius`、预测检查和超时停车保留。地图空间规则统一，不代表雷达检查或两边预测时间完全相同。
+- 两台机器 `colcon build --symlink-install --packages-select ego_planner robot_sim` 成功，控制器源码 SHA256 一致。本机栅格边界/分辨率/浮点中心/占用点回归和 launch 几何参数求值通过。
+- bag15 离线核对 178 帧：旧判定当前车位阻挡 178 帧，新判定 0 帧。只证明该录包中的额外边界误拦被消除；尚未进行本次修复后的实车运动验证。
+- 本次未修改 B 样条、状态机、planner_manager 或速度上限。电脑 launch 的 `max_tracking_error` 名称笔误同时修复，保留两机其它既有参数差异。

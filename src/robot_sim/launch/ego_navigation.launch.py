@@ -1,9 +1,10 @@
+from launch_ros.parameter_descriptions import ParameterValue
 import os  # 通过包资源目录定位配置，避免依赖当前工作目录。
 from ament_index_python.packages import get_package_share_directory  # 获取安装后的资源位置。
 from launch import LaunchDescription  # 管理整条在线导航启动链。
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument  # 复用仿真与 EGO 的已有入口。
 from launch.launch_description_sources import PythonLaunchDescriptionSource  # 加载 Python launch。
-from launch.substitutions import LaunchConfiguration  # 允许无界面运行和选择出生位置。
+from launch.substitutions import LaunchConfiguration, PythonExpression  # 允许无界面运行和选择出生位置。
 from launch_ros.actions import Node  # 启动 SLAM、轨迹服务器、适配器和 RViz。
 from launch.conditions import IfCondition  # 无界面验证时可关闭 RViz。
 
@@ -11,7 +12,11 @@ from launch.conditions import IfCondition  # 无界面验证时可关闭 RViz。
 def generate_launch_description():  # ROS 2 launch 入口。
     sim = get_package_share_directory('robot_sim')  # 仿真包资源根目录。
     ego = get_package_share_directory('ego_planner')  # 使用当前 overlay 编译的二维 EGO。
-    return LaunchDescription([  # 各节点等待话题和 TF 就绪，无需固定启动延时。
+    return LaunchDescription([
+        DeclareLaunchArgument('map_resolution', default_value='0.1'),
+        DeclareLaunchArgument('map_size_x_', default_value='42.0'),
+        DeclareLaunchArgument('map_size_y_', default_value='30.0'),
+        # 各节点等待话题和 TF 就绪，无需固定启动延时。
         DeclareLaunchArgument('gui', default_value='true'),  # 控制 Gazebo 图形窗口。
         DeclareLaunchArgument('rviz', default_value='true'),  # 控制 RViz 导航界面。
         DeclareLaunchArgument('x', default_value='-4.1'),  # 默认出生在已有世界的房间内。
@@ -42,7 +47,10 @@ def generate_launch_description():  # ROS 2 launch 入口。
             package='ego_planner', # 使用原 EGO 包的新增可执行程序。
             executable='ground_traj_server', # 原 traj_server 仍保留但不同时启动。
             name='ground_traj_server', # 独立名称方便查看参数。
-            parameters=[{'use_sim_time': True}], # 与 Gazebo 统一时间。
+            parameters=[{'use_sim_time': True, 'grid_origin_x': ParameterValue(PythonExpression(['-0.5 * ', LaunchConfiguration('map_size_x_')]), value_type=float),
+                          'grid_origin_y': ParameterValue(PythonExpression(['-0.5 * ', LaunchConfiguration('map_size_y_')]), value_type=float),
+                          'grid_origin_z': -0.5,
+                          'grid_resolution': ParameterValue(LaunchConfiguration('map_resolution'), value_type=float)}], # 与规划器共用栅格几何。
             output='screen'), # 输出到点与运行状态。
         Node(package='robot_sim', 
              executable='ego_navigation_bridge.py', 

@@ -5,6 +5,7 @@
 #include <algorithm> // clamp 用于限制轨迹求值时间。
 #include <cmath> // 平面旋转与圆形碰撞检查。
 #include <memory> // 智能指针保存 ROS 接口。
+#include <stdexcept>
 #include <vector> // 保存雷达命中点。
 #include <rclcpp/rclcpp.hpp> // 使用节点时钟和周期回调。
 #include <tf2_ros/buffer.h> // 查询雷达到底盘的真实 TF。
@@ -39,6 +40,14 @@ public:
     yaw_lookahead_ = declare_parameter("yaw_lookahead", 0.3); // 提前看 0.3 s，减轻弯道滞后。
     radius_ = declare_parameter("safety_radius", 0.22);
     grid_resolution_ = declare_parameter("grid_resolution", 0.1); // 与规划器共用分辨率。
+    grid_origin_x_ = declare_parameter("grid_origin_x", -21.0);
+    grid_origin_y_ = declare_parameter("grid_origin_y", -15.0);
+    grid_origin_z_ = declare_parameter("grid_origin_z", -0.5);
+    if (!std::isfinite(grid_resolution_) || grid_resolution_ <= 0.0 ||
+        !std::isfinite(grid_origin_x_) || !std::isfinite(grid_origin_y_) ||
+        !std::isfinite(grid_origin_z_))
+      throw std::invalid_argument("Invalid collision grid geometry");
+
     // 所有订阅器保存在成员中，避免构造结束后被释放。
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom", 10, [this](nav_msgs::msg::Odometry::ConstSharedPtr m) {
@@ -167,7 +176,8 @@ private:
     {
       if (!std::isfinite(*x) || !std::isfinite(*y) || // 排除无效水平坐标。
           !std::isfinite(*z)) continue; // 排除无效高度。
-      if (std::abs(*z) > grid_resolution_ * 0.51) continue; // 保留 z=0 邻近层。
+      if (gridIndex(*z, grid_origin_z_) != gridIndex(0.0, grid_origin_z_))
+        continue; // 与二维规划器一致，只查 z=0 所属层，不合并相邻层。
       inflated_points_.emplace_back(*x, *y); // 保存 odom 下的禁行栅格中心。
     }
 
@@ -183,10 +193,16 @@ private:
     return {s * vx - c * vy, c * vx + s * vy}; // 支持麦轮横移的恒定 Twist 预测。
   }
 
+  double gridIndex(double position, double origin) const
+  {
+    // 与 GridMap::posToIndex 相同：左闭右开，负坐标同样向下取整。
+    return std::floor((position - origin) * (1.0 / grid_resolution_));
+  }
+
   bool blockedByMap(double vx, double vy, double wz = 0.0) const // 输入为规划坐标速度。
   {
     const auto &p = odom_.pose.pose.position; // 从实际车位开始预测。
-    const double half = grid_resolution_ * 0.5 + 0.01; // 栅格半宽加 1 cm 余量。
+    // 障碍已经由规划器膨胀；此处不再额外扩大栅格。
 
     for (int i = 0; i <= 12; ++i) // 检查当前到未来 0.6 秒的位置。
     {
@@ -197,8 +213,8 @@ private:
 
       for (const auto &cell : inflated_points_) // 检查预测中心是否进入禁行格。
       {
-        if (std::abs(x - cell.x()) <= half && // 判断是否进入栅格的 x 范围。
-            std::abs(y - cell.y()) <= half) // 判断是否同时进入 y 范围。
+        if (gridIndex(x, grid_origin_x_) == gridIndex(cell.x(), grid_origin_x_) &&
+            gridIndex(y, grid_origin_y_) == gridIndex(cell.y(), grid_origin_y_))
           return true; // 预测进入膨胀区，拒绝该速度。
       }
     }
@@ -357,6 +373,7 @@ private:
   std::vector<Eigen::Vector2d> scan_points_; // 车体坐标下的障碍。
   std::vector<Eigen::Vector2d> inflated_points_; // odom 下的膨胀栅格中心。
   double inflated_time_ = -100.0; // 未收到膨胀地图前保持停车。
+  double grid_origin_x_ = -21.0, grid_origin_y_ = -15.0, grid_origin_z_ = -0.5;
   double grid_resolution_ = 0.1; // 与 EGO 的 grid_map/resolution 保持一致。
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr inflated_sub_; // 保持订阅器存活。
   bool aligning_ = false; // 最终朝向阶段的滞回状态。

@@ -217,7 +217,7 @@ def generate_launch_description():
             {'manager/max_vel': max_vel},              # 各轴最大速度，m/s。
             {'manager/max_acc': max_acc},              # 各轴最大加速度，m/s²。
             {'manager/max_jerk': 4.0},                 # jerk 配置，m/s³。
-            {'manager/control_points_distance': ParameterValue(LaunchConfiguration('control_points_distance', default='0.4'), value_type=float)},  # 相邻控制点期望间距，m。
+            {'manager/control_points_distance': 0.4},  # 相邻控制点期望间距，m。
             {'manager/feasibility_tolerance': 0.05},   # 可行性检查允许约 5% 余量。
             {'manager/planning_horizon': planning_horizon},
             {'manager/use_distinctive_trajs': use_distinctive_trajs},
