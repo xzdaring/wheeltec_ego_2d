@@ -14,6 +14,7 @@ install(DIRECTORY launch urdf worlds config models # 同时安装在线建图参
 install(PROGRAMS # 安装导航适配和独立显示节点。
   scripts/ego_navigation_bridge.py # 地图与目标转换。
   scripts/navigation_visualizer.py # 曲线、行驶路径和参数文字。
+  scripts/waypoint_runner.py # 按顺序执行带终点朝向的航点。
   scripts/scan_self_filter.py # 按车体轮廓过滤实车自身回波。
   DESTINATION lib/${PROJECT_NAME}) # ros2 launch 的可执行查找目录。
 install(FILES REAL_ROBOT.md DESTINATION share/${PROJECT_NAME})

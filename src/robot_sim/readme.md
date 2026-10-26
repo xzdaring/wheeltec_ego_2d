@@ -201,3 +201,44 @@ EGO 最终曲线自由末端可有少量位置偏差，因此最后一小段增�
 ## 实车运行
 
 V550_mec + N10P 的传输、编译、硬件启动和 EGO 操作见 [REAL_ROBOT.md](REAL_ROBOT.md)。
+
+### 三航点顺序仿真
+
+```bash
+source /opt/ros/humble/setup.bash
+source /ros_workspace/wheeltec_ego_2d/install/setup.bash
+ros2 launch robot_sim ego_navigation.launch.py run_waypoints:=true
+```
+
+航点位于 `config/waypoints.yaml`，默认按 `map` 坐标发送：
+`(-0.5,-6.5,0.08,-1.57)` → `(-10,-3,0.08,3.14)` → `(-1,4,0.08,0)`。
+每组为 x/y/z（米）与 yaw（弧度）。地面规划器仍使用二维 z=0；0.08是目标消息高度。
+
+每个航点由控制器确认位置和朝向均已达标，并发布 `/ego/goal_reached`（PoseStamped，保留已接受目标的时间戳与位姿）。航点程序核对完成消息对应当前目标后，等待新鲜里程计的平移速度小于0.02米/秒、角速度小于0.03弧度/秒并持续1秒，再发送下一点。停车后的微小姿态漂移不会推翻控制器已经给出的完成结果；旧目标的完成消息不会触发新航点切换。到达判断使用桥转换后的目标及 odom，与控制器一致。状态通过 `/ego/waypoint_status` 发布。
+
+普通启动默认 `run_waypoints:=false`，仍由 RViz 手动给目标。执行航点期间不要同时在RViz发送另一目标。单点超过300秒仿真时间时不再发送后续航点；当前导航目标仍有效，需要停止时关闭本次导航启动进程。
+
+### 自动测试报告脚本
+
+工作区根目录执行 `./scripts/test_ego_sim.sh`，脚本自动启动仿真并依次执行可修改的航点，结束后输出总耗时、各段耗时、失败航段及相关日志。详细用法见工作区 `scripts/README_sim_test.md`。目标配置可通过 `--waypoints /路径/配置.yaml` 指定；只检查配置用 `--validate-only`，不启动图形界面用 `--headless`。
+
+
+### 仿真启动扫描保护
+
+`v550_sim.launch.py` 启用 `scan_self_filter` 的 `sim_settling_gate`。扫描按采样时刻的odom→base_link TF检查：高度0～0.04m、roll/pitch绝对值不超过2°、垂直速度绝对值不超过0.003m/s，并连续稳定1秒后，才输出/scan。异常时不发布空白扫描，而是停止发布，使控制器的感知看门狗停车；姿态恢复后重新等待稳定。该高度条件适用于本项目平地V550模型。实车默认关闭该功能。
+
+仿真航点节点设置 `wait_for_scan=true`，等待新鲜/scan后才发送目标，避免模型仍在落地时开始导航。初次启动等待落稳是正常现象。已有污染地图需要关闭旧导航并重新启动SLAM建图，本次保护不会追溯清除旧地图。
+
+
+### 100次批量测试
+
+`./scripts/test_ego_sim.sh --runs 100 --headless` 会独立重启并测试100次，失败后继续下一次；Ctrl+C停止整个批次。脚本默认次数已为100，单次调试用 `--runs 1`。批次目录下summary.txt/json为汇总，runs.csv、segments.csv为每轮/每段明细，run_001～run_100分别保留完整报错日志。目标配置使用批次启动时的快照，100轮保持一致。
+
+### 轨迹图与图形界面
+
+测试脚本每轮结束保存trajectory.png（实际轨迹、已发送目标、最后局部规划及可用地图背景）和trajectory.csv。批量时位于各run_NNN目录。`./scripts/test_ego_sim.sh --runs 1`自动打开Gazebo和RViz；增加`--headless`关闭界面，仍会保存轨迹图。绘图失败见plot_error.txt，不覆盖原导航结果。
+
+
+### 当前测试输出位置与命名
+
+后续测试统一默认保存到工作区 `test_data/<批次时间戳>/`。单轮结果按 `001_成功_123.45秒`、`002_失败`、`003_中断`命名；图片和日志放在各自目录。成功时间指首个目标发出到最后航点完成并停稳的实际全程时间，不含启动和清理。此前diagnostics中的历史结果不自动移动。此规则替代上文旧的输出路径说明。

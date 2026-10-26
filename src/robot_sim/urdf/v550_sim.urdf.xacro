@@ -61,29 +61,29 @@
       <!-- 相对于 laser_scan 的位姿；扫描高度已由固定关节表达。 -->
       <pose>0 0 0 0 0 0</pose>
       <always_on>true</always_on>
-      <update_rate>10</update_rate>
+      <update_rate>12</update_rate> <!-- 按实车录包约 12 Hz；仿真时间频率。 -->
       <visualize>false</visualize>
       <ray>
         <scan>
           <horizontal>
-            <!-- 教学仿真参数：360 度、720 束；不是实物雷达规格。 -->
-            <samples>720</samples>
+            <!-- 与实车过滤输出一致：360 度，1800 个角度格，每格 0.2 度。 -->
+            <samples>1800</samples>
             <resolution>1</resolution>
-            <min_angle>-3.141592653589793</min_angle>
-            <max_angle>3.141592653589793</max_angle>
+            <min_angle>0.0</min_angle>
+            <max_angle>6.279694648675598</max_angle> <!-- 359.8 度，避免首尾重复射线。 -->
           </horizontal>
         </scan>
         <range>
-          <min>0.10</min>
-          <max>12.0</max>
+          <min>0.15</min>
+          <max>200.0</max> <!-- 对齐 lsm10_p.yaml 的软件量程上限，不代表硬件有效量程。 -->
           <resolution>0.01</resolution>
         </range>
       </ray>
       <plugin name="v550_lidar_ros" filename="libgazebo_ros_ray_sensor.so">
         <ros>
           <namespace>/</namespace>
-          <!-- ~/out 是 ROS 2 ray 插件的输出端，重映射为统一的 /scan。 -->
-          <remapping>~/out:=/scan</remapping>
+          <!-- ~/out 是 ROS 2 ray 插件的输出端，先输出 /scan_raw，由共用过滤节点产生 /scan。 -->
+          <remapping>~/out:=/scan_raw</remapping>
         </ros>
         <output_type>sensor_msgs/LaserScan</output_type>
         <!-- 即使 Gazebo 合并固定关节，也明确使用原 URDF 的雷达坐标系。 -->

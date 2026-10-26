@@ -9,6 +9,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetE
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -27,6 +28,9 @@ def generate_launch_description():
     spawn_x = LaunchConfiguration('x')
     spawn_y = LaunchConfiguration('y')
     spawn_z = LaunchConfiguration('z')
+    spawn_roll = LaunchConfiguration('roll')
+    spawn_pitch = LaunchConfiguration('pitch')
+    spawn_yaw = LaunchConfiguration('yaw')
 
     # 只展开一次，使 Gazebo 和状态发布器使用完全相同的 link/joint 定义。
     description_path = os.path.join(sim_share, 'urdf', 'v550_sim.urdf.xacro')
@@ -66,6 +70,19 @@ def generate_launch_description():
         DeclareLaunchArgument('y', default_value='0.0', description='Initial Y in metres'),
         DeclareLaunchArgument('z', default_value='0.15', description='Initial Z in metres'),
 
+        DeclareLaunchArgument('roll', default_value='0.0', description='Initial roll in radians'),
+        DeclareLaunchArgument('pitch', default_value='0.0', description='Initial pitch in radians'),
+        DeclareLaunchArgument('yaw', default_value='0.0', description='Initial yaw in radians'),
+        DeclareLaunchArgument('factory_mask_mode', default_value='full', choices=['near', 'full', 'off']),
+        DeclareLaunchArgument('factory_near_range', default_value='0.26'),
+        # 与实车复用同一过滤器；仿真的底盘坐标为 base_link。
+        Node(package='robot_sim', executable='scan_self_filter.py',
+             parameters=[{'use_sim_time': True, 'base_frame': 'base_link',
+                          'sim_settling_gate': True, 'sim_gate_frame': 'odom',
+                          'factory_mask_mode': ParameterValue(LaunchConfiguration('factory_mask_mode'), value_type=str),
+                          'factory_near_range': ParameterValue(LaunchConfiguration('factory_near_range'), value_type=float)}],
+             output='screen'),
+
         # gazebo_ros 启动服务器并加载 ROS 初始化与生成实体插件，提供 /clock。
         # 不要同时另开一个占用相同端口的 Gazebo 服务器。
         IncludeLaunchDescription(
@@ -93,7 +110,8 @@ def generate_launch_description():
             executable='spawn_entity.py', 
             output='screen',
             arguments=['-topic', 'robot_description', '-entity', 'v550_mec',
-                       '-x', spawn_x, '-y', spawn_y, '-z', spawn_z],
+                       '-x', spawn_x, '-y', spawn_y, '-z', spawn_z,
+                       '-R', spawn_roll, '-P', spawn_pitch, '-Y', spawn_yaw],
             parameters=[{'use_sim_time': True}],
         ),
     ])

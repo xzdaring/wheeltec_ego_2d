@@ -182,7 +182,7 @@ def generate_launch_description():
             {'grid_map/local_update_range_x': 5.5}, # 每次围绕相机更新的局部半范围，m。
             {'grid_map/local_update_range_y': 5.5},
             {'grid_map/local_update_range_z': 4.5},
-            {'grid_map/obstacles_inflation': ParameterValue(LaunchConfiguration('obstacles_inflation', default='0.20'), value_type=float)}, # 点云圆形膨胀半径，米。
+            {'grid_map/obstacles_inflation': ParameterValue(LaunchConfiguration('obstacles_inflation', default='0.20'), value_type=float)}, # 膨胀半径，米。
             {'grid_map/local_map_margin': 10},       # 局部更新边界额外保留的体素层数。
             {'grid_map/ground_height': -0.5},       # 世界坐标地面高度，m。
             # 相机参数：必须与深度图实际标定一致。

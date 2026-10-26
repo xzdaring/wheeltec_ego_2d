@@ -293,3 +293,23 @@ bag9 19.85 秒，/scan 234 帧，/map 38 帧但只有 1 种内容，EKF 平移�
 - 两台机器 `colcon build --symlink-install --packages-select ego_planner robot_sim` 成功，控制器源码 SHA256 一致。本机栅格边界/分辨率/浮点中心/占用点回归和 launch 几何参数求值通过。
 - bag15 离线核对 178 帧：旧判定当前车位阻挡 178 帧，新判定 0 帧。只证明该录包中的额外边界误拦被消除；尚未进行本次修复后的实车运动验证。
 - 本次未修改 B 样条、状态机、planner_manager 或速度上限。电脑 launch 的 `max_tracking_error` 名称笔误同时修复，保留两机其它既有参数差异。
+
+
+## 2026-10-26 bag7 仿真跟踪保护
+
+仿真入口新增 `max_tracking_error`，默认0.20米并转发给FSM，避免原地转向/停车时滚动轨迹脱离实际车位。robot_sim构建通过。相同反向目标在空世界测试到目标6.3cm，最大参考偏差9.9cm。原世界近似复现仍受近障急停限制，150秒未到目标；最大参考偏差降至21.5cm。此项验证不代表原场景通行问题全部解决。详细证据见 diagnostics/bag7_tracking_fix/REPORT.md。
+
+
+## 2026-10-26 三航点顺序仿真
+
+新增waypoint_runner及config/waypoints.yaml，使用run_waypoints:=true启用。原世界无界面Gazebo测试依次到达三个指定点，位置误差约7.1/5.7/6.0cm，朝向误差均小于0.05rad；每点停稳1秒后自动切换。详见diagnostics/three_waypoints_20261026/REPORT.md及result.json。未连接实车。
+
+
+## 2026-10-26 航点完成反馈修复
+
+控制器完成目标后发送 `/ego/goal_reached`，原样回传已接受目标的PoseStamped；航点程序按frame、时间戳、位姿匹配，收到当前目标完成反馈后只检查停稳1秒，不再用停车后漂移的yaw重新否定完成。此规则取代此前两处各自判断位置/朝向的做法。ego_planner、robot_sim构建通过。独立域101用真实控制器和航点程序完成两点协议测试：首次完成后人为将yaw误差从0.04改为0.08，仍成功切换；第二目标未到时旧完成消息不会误触发，实际到达后才完成。详见diagnostics/waypoint_completion_fix/handshake_result.json。本次未重跑三点完整Gazebo路线，用户原仿真已停止。
+
+
+## 2026-10-26 bag10 启动地面回波防护
+
+增加仿真落地/姿态稳定扫描门控，以及航点启动等待有效扫描。bag10离线按同一稳定规则检查，423帧中放行246帧，首次放行为录包22.46秒，放行帧中地面高度近点计数为0（该分类可能含极低墙脚，见原诊断）。无界面Gazebo独立域103实际验证：前172帧原始扫描未进入/scan；首次放行时base_z约0.0205m、roll约-0.0000028rad、pitch约0.000397rad，首个目标时间戳晚于首帧放行扫描。robot_sim symlink-install构建及语法检查通过。本次只验证启动防护，没有重跑完整三航点任务。详见diagnostics/startup_scan_fix。

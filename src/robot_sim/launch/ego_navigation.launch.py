@@ -17,16 +17,27 @@ def generate_launch_description():  # ROS 2 launch 入口。
         DeclareLaunchArgument('map_size_x_', default_value='42.0'),
         DeclareLaunchArgument('map_size_y_', default_value='30.0'),
         # 各节点等待话题和 TF 就绪，无需固定启动延时。
+        DeclareLaunchArgument('waypoints_file', default_value=os.path.join(sim, 'config', 'waypoints.yaml')),
+        DeclareLaunchArgument('run_waypoints', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('gui', default_value='true'),  # 控制 Gazebo 图形窗口。
         DeclareLaunchArgument('rviz', default_value='true'),  # 控制 RViz 导航界面。
-        DeclareLaunchArgument('x', default_value='-4.1'),  # 默认出生在已有世界的房间内。
-        DeclareLaunchArgument('y', default_value='-3.3'),  # 可按世界空地调整出生位置。
+        DeclareLaunchArgument('init_x', default_value='0.0'),  # 默认出生在已有世界的房间内。
+        DeclareLaunchArgument('init_y', default_value='-0.5'),  # 可按世界空地调整出生位置。
+        DeclareLaunchArgument('init_roll', default_value='0.0'),
+        DeclareLaunchArgument('init_pitch', default_value='0.0'),
+        DeclareLaunchArgument('init_yaw', default_value='3.14'),
+        DeclareLaunchArgument('max_tracking_error', default_value='0.20'), # 跟踪偏差超过20 cm时从实际车位重规划，避免原地转向时轨迹继续跑。
+        DeclareLaunchArgument('obstacle_source', default_value='scan', choices=['scan', 'map']), # 默认与实车一致，用过滤后的实时雷达规划。
+        DeclareLaunchArgument('obstacles_inflation', default_value='0.15'), # 米：15 cm。
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(sim, 'launch', 'v550_sim.launch.py')), 
                 launch_arguments={'gui': LaunchConfiguration('gui'), 
-                                  'x': LaunchConfiguration('x'), 
-                                  'y': LaunchConfiguration('y')}.items()),  # Gazebo 提供底盘、雷达、里程计和 TF。
+                                  'x': LaunchConfiguration('init_x'),
+                                  'y': LaunchConfiguration('init_y'),
+                                  'roll': LaunchConfiguration('init_roll'),
+                                  'pitch': LaunchConfiguration('init_pitch'),
+                                  'yaw': LaunchConfiguration('init_yaw')}.items()),  # Gazebo 提供底盘、雷达、里程计和 TF。
         Node(package='slam_toolbox', 
              executable='async_slam_toolbox_node', 
              name='slam_toolbox', 
@@ -36,10 +47,13 @@ def generate_launch_description():  # ROS 2 launch 入口。
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(ego, 'launch', 'advanced_param.launch.py')),
-                launch_arguments={  'flight_type': '1', 
+                launch_arguments={  'flight_type': '1',
+                                    'map_resolution': LaunchConfiguration('map_resolution'),
+                                    'obstacles_inflation': LaunchConfiguration('obstacles_inflation'),
                                     'drone_id': '0', 
-                                    'max_vel': '0.25', 
-                                    'max_acc': '0.4', 
+                                    'max_vel': '0.5',
+                                    'max_tracking_error': LaunchConfiguration('max_tracking_error'),
+                                    'max_acc': '0.7',
                                     'planning_horizon': '5.0', 
                                     'use_distinctive_trajs': 'False', 
                                     'obj_num_set': '0'}.items()),  # 复用 EGO 状态机，低速调试平面重规划。
@@ -50,17 +64,23 @@ def generate_launch_description():  # ROS 2 launch 入口。
             parameters=[{'use_sim_time': True, 'grid_origin_x': ParameterValue(PythonExpression(['-0.5 * ', LaunchConfiguration('map_size_x_')]), value_type=float),
                           'grid_origin_y': ParameterValue(PythonExpression(['-0.5 * ', LaunchConfiguration('map_size_y_')]), value_type=float),
                           'grid_origin_z': -0.5,
+                          'max_yaw_rate': 1.0,  # rad/s，约57.3°/s
                           'grid_resolution': ParameterValue(LaunchConfiguration('map_resolution'), value_type=float)}], # 与规划器共用栅格几何。
             output='screen'), # 输出到点与运行状态。
         Node(package='robot_sim', 
              executable='ego_navigation_bridge.py', 
-             parameters=[{'use_sim_time': True}], 
+             parameters=[{'use_sim_time': True,
+                          'obstacle_source': LaunchConfiguration('obstacle_source')}],
              output='screen'),  # 仅负责地图与目标转换，车速由 C++ 节点唯一发布。
         Node( # 显示真实曲线、全局参考和运行参数，不参与控制。
             package='robot_sim', # 与仿真一起安装。
             executable='navigation_visualizer.py', # 独立低频可视化节点。
             parameters=[{'use_sim_time': True}], # 所有标记跟随仿真时间。
             output='screen'), # 显示失败可在终端诊断。
+        Node(package='robot_sim', executable='waypoint_runner.py',
+             parameters=[LaunchConfiguration('waypoints_file'),
+                         {'use_sim_time': True, 'wait_for_scan': True}],
+             condition=IfCondition(LaunchConfiguration('run_waypoints')), output='screen'),
         Node(package='rviz2', 
              executable='rviz2', 
              arguments=['-d', os.path.join(sim, 'config', 'navigation.rviz')], 

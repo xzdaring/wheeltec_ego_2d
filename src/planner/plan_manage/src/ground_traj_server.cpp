@@ -34,8 +34,8 @@ public:
     max_speed_ = declare_parameter("max_speed", 0.3);
     tolerance_ = declare_parameter("goal_tolerance", 0.12);
     yaw_gain_ = declare_parameter("kp_yaw", 1.5); // 到点后的角度反馈增益。
-    max_yaw_rate_ = declare_parameter("max_yaw_rate", 0.6); // 转向限速 rad/s。
-    yaw_tolerance_ = declare_parameter("yaw_tolerance", 0.05); // 朝向容差 rad。
+    max_yaw_rate_ = declare_parameter("max_yaw_rate", 0.8); // 转向限速 rad/s。
+    yaw_tolerance_ = declare_parameter("yaw_tolerance", 0.1); // 朝向容差 rad。
     follow_yaw_ = declare_parameter("follow_trajectory_yaw", true); // 默认沿轨迹转动车头。
     yaw_lookahead_ = declare_parameter("yaw_lookahead", 0.3); // 提前看 0.3 s，减轻弯道滞后。
     radius_ = declare_parameter("safety_radius", 0.22);
@@ -75,6 +75,7 @@ public:
       [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr m) {
         active_ = aligning_ = false; // 新目标必须等待新的规划结果。
         have_goal_ = m->header.frame_id == planning_frame_;
+        goal_message_ = *m; // 用目标原始时间戳和位姿标识完成反馈，避免旧航点被误认。
         goal_ = m->pose.position; // 位置与朝向都已经转换到 odom。
         goal_yaw_ = yaw(m->pose.orientation); // 保存点击箭头要求的最终朝向。
         goal_time_ = rclcpp::Time(m->header.stamp).seconds();
@@ -87,6 +88,8 @@ public:
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
       "/scan", rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::LaserScan::ConstSharedPtr m) { onScan(*m); });
+    reached_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>(
+      "/ego/goal_reached", rclcpp::QoS(1).transient_local()); // 保留最近一次完成消息，目标标识用于排除旧反馈。
     velocity_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     reference_pub_ = create_publisher<quadrotor_msgs::msg::PositionCommand>(
       "/ego/position_cmd", 10); // 调试接口，不再经消息转发参与反馈控制。
@@ -277,7 +280,7 @@ private:
     }
     const auto &p = odom_.pose.pose.position; // 当前真实底盘位置。
     const double distance = std::hypot(goal_.x - p.x, goal_.y - p.y);
-    if (distance < tolerance_ * 0.5 || (aligning_ && distance < tolerance_))
+    if (distance < tolerance_ || (aligning_ && distance < tolerance_))
     // 进入转向用更严格的位置阈值，退出保留原容差，避免阈值附近来回切换。
     {
       aligning_ = true; // 已进入最终转向阶段，允许容差内的小幅漂移。
@@ -294,6 +297,8 @@ private:
       else // 位置和朝向同时达标才宣布成功。
       {
         active_ = have_goal_ = false; // 下一次点击重新启动。
+        stop(); // 先明确发零速，再通知航点程序本目标已经完成。
+        reached_pub_->publish(goal_message_); // 仅在位置和朝向都达标的分支发布。
         RCLCPP_INFO(get_logger(), "位置与最终朝向均已到达，已停车。");
       }
       reference_yaw_ = goal_yaw_; // 最终朝向优先于轨迹切线。
@@ -369,6 +374,7 @@ private:
   ego_planner::UniformBspline position_, velocity_; // 位置曲线及其导数。
   ego_planner::UniformBspline acceleration_; // 切线角速度前馈所需的二阶导数。
   nav_msgs::msg::Odometry odom_; // 保存完整姿态反馈。
+  geometry_msgs::msg::PoseStamped goal_message_; // 保存已接受目标的身份。
   geometry_msgs::msg::Point goal_; // 最终位置目标。
   std::vector<Eigen::Vector2d> scan_points_; // 车体坐标下的障碍。
   std::vector<Eigen::Vector2d> inflated_points_; // odom 下的膨胀栅格中心。
@@ -394,6 +400,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr click_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
   rclcpp::Subscription<traj_utils::msg::Bspline>::SharedPtr spline_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr reached_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr velocity_pub_;
   rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr reference_pub_;
 };

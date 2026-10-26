@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """结合车体轮廓与厂家遮挡角度，剔除 V550 自身回波。"""
 import copy
+from collections import deque
 import math
 
 import numpy as np
@@ -84,9 +85,39 @@ def body_hit_mask(scan, transform, bounds):
         (points[:, 1] >= ymin) & (points[:, 1] <= ymax)
 
 
+class SettlingGate:
+    """仿真专用：在扫描时刻检查落地高度、倾角及垂直速度，并连续稳定一段时间。"""
+    def __init__(self, max_z=0.04, max_tilt=math.radians(2.0), max_vz=0.003, hold=1.0):
+        self.max_z, self.max_tilt, self.max_vz, self.hold = max_z, max_tilt, max_vz, hold
+        self.previous = None
+        self.since = None
+
+    def update(self, stamp, z, roll, pitch):
+        previous = self.previous
+        self.previous = (stamp, z)
+        if previous is None or not 0 < stamp - previous[0] <= 0.5:
+            self.since = None
+            return False
+        vz = (z - previous[1]) / (stamp - previous[0])
+        safe = all(math.isfinite(v) for v in (z, roll, pitch, vz)) and (
+            0.0 <= z <= self.max_z and max(abs(roll), abs(pitch)) <= self.max_tilt
+            and abs(vz) <= self.max_vz)
+        if not safe:
+            self.since = None
+            return False
+        if self.since is None:
+            self.since = stamp
+        return stamp - self.since >= self.hold
+
+
 class ScanSelfFilter(Node):
     def __init__(self):
         super().__init__('scan_self_filter')
+        self.sim_gate_enabled = self.declare_parameter('sim_settling_gate', False).value
+        self.sim_gate_frame = self.declare_parameter('sim_gate_frame', 'odom').value
+        self.sim_gate = SettlingGate()
+        self.pending = deque(maxlen=12)
+        self.gate_ready = False
         self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
         # 用户实测含轮长 26 cm、宽 23 cm，与 CAD 包络基本一致。
         # 预留 1 cm 尺寸测量和模型误差；轮廓外近点保留，不改近障停车半径。
@@ -111,12 +142,50 @@ class ScanSelfFilter(Node):
         self.listener = TransformListener(self.buffer, self)
         self.publisher = self.create_publisher(LaserScan, '/scan', 10)
         self.create_subscription(LaserScan, '/scan_raw', self.on_scan, qos_profile_sensor_data)
+        if self.sim_gate_enabled:
+            self.get_logger().info('仿真启动保护：等待高度不超过4 cm、倾角不超过2度、垂直速度不超过3 mm/s，并连续稳定1秒。')
+            self.create_timer(0.02, self.drain_pending)
         self.get_logger().info(f'自身回波过滤轮廓 {self.bounds}，坐标系 {self.base_frame}')
         self.get_logger().info(
             f'厂家角度过滤模式 {self.factory_mode}，近距门槛 {self.factory_near_range} m，'
             f'雷达角度区间 {list(self.factory_sectors)}')
 
     def on_scan(self, scan):
+        if self.sim_gate_enabled:
+            self.pending.append(scan) # 等扫描时刻的odom TF就绪，避免使用错时姿态。
+            return
+        self.filter_scan(scan)
+
+    def drain_pending(self):
+        while self.pending:
+            scan = self.pending[0]
+            stamp = Time.from_msg(scan.header.stamp)
+            age = self.get_clock().now().nanoseconds * 1e-9 - stamp.nanoseconds * 1e-9
+            if age > 0.5 or age < -0.1:
+                self.pending.popleft()
+                self.sim_gate.since = None
+                self.gate_ready = False
+                continue
+            try:
+                pose = self.buffer.lookup_transform(self.sim_gate_frame, self.base_frame, stamp).transform
+            except TransformException:
+                return # 等待下一次TF到达，超过0.5秒则由上方丢弃。
+            self.pending.popleft()
+            q = pose.rotation
+            roll = math.atan2(2 * (q.w*q.x + q.y*q.z), 1 - 2 * (q.x*q.x + q.y*q.y))
+            pitch = math.asin(max(-1.0, min(1.0, 2 * (q.w*q.y - q.z*q.x))))
+            ready = self.sim_gate.update(stamp.nanoseconds * 1e-9, pose.translation.z, roll, pitch)
+            if not ready:
+                if self.gate_ready:
+                    self.get_logger().warning('仿真车体姿态异常，暂停扫描；下游超时停车。')
+                self.gate_ready = False
+                continue # 不发布空扫描，避免把暂时不可用的感知当作空旷环境。
+            if not self.gate_ready:
+                self.get_logger().info('仿真车体已落地并稳定，开始放行扫描。')
+            self.gate_ready = True
+            self.filter_scan(scan)
+
+    def filter_scan(self, scan):
         try:
             tr = self.buffer.lookup_transform(
                 self.base_frame, scan.header.frame_id, Time.from_msg(scan.header.stamp))

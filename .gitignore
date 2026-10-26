@@ -4,6 +4,8 @@ diagnostics/
 install/
 log/
 .vscode/
+test_data/
+scripts/
 *.db3
 *.mcap
 rosbag2_*/

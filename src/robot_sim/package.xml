@@ -38,6 +38,7 @@
   <exec_depend>geometry_msgs</exec_depend>
   <!-- 在线导航使用 nav_msgs 提供消息、计算或运行节点。 -->
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <!-- 在线导航使用 quadrotor_msgs 提供消息、计算或运行节点。 -->
   <exec_depend>quadrotor_msgs</exec_depend>
   <!-- 在线导航使用 traj_utils 提供消息、计算或运行节点。 -->
